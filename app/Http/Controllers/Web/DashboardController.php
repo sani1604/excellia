@@ -8,6 +8,7 @@ use App\Models\AcademicYear;
 use App\Models\DocumentTask;
 use App\Models\NotificationLog;
 use App\Models\Role;
+use App\Services\ManagementMisService;
 use App\Services\ReportingService;
 use Illuminate\Http\Request;
 use Illuminate\View\View;
@@ -16,6 +17,7 @@ class DashboardController extends Controller
 {
     public function __construct(
         private readonly ReportingService $reporting,
+        private readonly ManagementMisService $managementMis,
     ) {}
 
     public function index(Request $request): View
@@ -80,12 +82,17 @@ class DashboardController extends Controller
             ->limit(8)
             ->get();
 
+        $executiveOverview = $this->managementMis->executiveOverview($user, [
+            'academic_year_id' => $yearId,
+        ]);
+
         return view('dashboard.leadership', [
             'currentYear' => $currentYear,
             'academicYears' => AcademicYear::query()->orderByDesc('start_date')->get(),
             'selectedYearId' => $yearId,
             'summary' => $dashboardData['summary'],
             'byDocumentType' => $dashboardData['by_document_type'],
+            'executiveOverview' => $executiveOverview,
             'pendingReviewTasks' => $pendingReviewTasks,
             'overdueAndEscalated' => $overdueAndEscalated,
             'recentNotifications' => $recentNotifications,

@@ -78,24 +78,28 @@
         <div>
             <h3 class="text-base font-bold text-slate-900">Quick Role Sign-In (Demo)</h3>
             <p class="text-sm text-slate-600 mt-1">
-                Tap <strong>Super Admin</strong> for all Masters & Integrations, or tap any Teacher / Coordinator / Principal below.
+                Tap <strong>Super Admin</strong> for Masters, <strong>Director / Principal</strong> for Management Charts & Custom MIS, or any Staff below.
             </p>
         </div>
 
         <div class="mt-4 space-y-2">
             @foreach($demoAccounts as $acc)
-                @php $isSa = $acc->primaryRole?->key === 'SUPER_ADMIN'; @endphp
+                @php
+                    $roleKey = $acc->primaryRole?->key ?? '';
+                    $isSa = $roleKey === 'SUPER_ADMIN';
+                    $isMgmt = in_array($roleKey, ['DIRECTOR', 'PRINCIPAL'], true);
+                @endphp
                 <form method="POST" action="{{ route('login.demo') }}">
                     @csrf
                     <input type="hidden" name="email" value="{{ $acc->email }}">
                     <button type="submit"
-                            class="w-full text-left px-4 py-3 rounded-xl {{ $isSa ? 'bg-slate-900 hover:bg-slate-800 text-white border-slate-900' : 'bg-white hover:bg-indigo-50 text-slate-900 border-slate-200 hover:border-indigo-400' }} border flex items-center justify-between gap-3 transition cursor-pointer shadow-2xs">
+                            class="w-full text-left px-4 py-3 rounded-xl {{ $isSa ? 'bg-slate-900 hover:bg-slate-800 text-white border-slate-900' : ($isMgmt ? 'bg-emerald-950 hover:bg-emerald-900 text-white border-emerald-900' : 'bg-white hover:bg-indigo-50 text-slate-900 border-slate-200 hover:border-indigo-400') }} border flex items-center justify-between gap-3 transition cursor-pointer shadow-2xs">
                         <div class="min-w-0">
                             <div class="text-sm font-semibold truncate">{{ $acc->full_name }}</div>
-                            <div class="text-xs {{ $isSa ? 'text-slate-300' : 'text-slate-500' }} truncate">{{ $acc->email }}</div>
+                            <div class="text-xs {{ ($isSa || $isMgmt) ? 'text-slate-300' : 'text-slate-500' }} truncate">{{ $acc->email }}</div>
                         </div>
-                        <span class="shrink-0 text-xs font-semibold px-2.5 py-1 rounded-full {{ $isSa ? 'bg-amber-400 text-slate-950' : 'bg-indigo-100 text-indigo-800' }}">
-                            {{ $acc->primaryRole?->name ?? 'Staff' }}
+                        <span class="shrink-0 text-xs font-semibold px-2.5 py-1 rounded-full {{ $isSa ? 'bg-amber-400 text-slate-950' : ($isMgmt ? 'bg-emerald-300 text-emerald-950' : 'bg-indigo-100 text-indigo-800') }}">
+                            {{ $roleKey === 'DIRECTOR' ? 'Management / Director' : ($acc->primaryRole?->name ?? 'Staff') }}
                         </span>
                     </button>
                 </form>

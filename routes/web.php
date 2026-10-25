@@ -4,6 +4,7 @@ use App\Http\Controllers\Web\AdminMastersController;
 use App\Http\Controllers\Web\AiPortalController;
 use App\Http\Controllers\Web\AuthController;
 use App\Http\Controllers\Web\DashboardController;
+use App\Http\Controllers\Web\ManagementMisController;
 use App\Http\Controllers\Web\ReportsPortalController;
 use App\Http\Controllers\Web\ReviewTaskPortalController;
 use App\Http\Controllers\Web\TeacherPortalController;
@@ -101,6 +102,23 @@ Route::middleware(['active.user'])->group(function () {
     Route::post('/task-management/{task}/reopen', [ReviewTaskPortalController::class, 'reopenTask'])
         ->middleware('permission:tasks.update')
         ->name('tasks.reopen');
+
+    // Executive Management Analytics, Visual Charts & Custom MIS Query Builder
+    Route::get('/management-mis', [ManagementMisController::class, 'index'])
+        ->middleware('permission:reports.view_school|reports.view_scope')
+        ->name('management.mis');
+
+    Route::get('/management-mis/export', [ManagementMisController::class, 'exportCsv'])
+        ->middleware('permission:reports.view_school|reports.view_scope')
+        ->name('management.mis.export');
+
+    Route::post('/management-mis/presets', [ManagementMisController::class, 'storePreset'])
+        ->middleware('permission:reports.view_school|reports.view_scope')
+        ->name('management.mis.presets.store');
+
+    Route::delete('/management-mis/presets/{presetId}', [ManagementMisController::class, 'destroyPreset'])
+        ->middleware('permission:reports.view_school|reports.view_scope')
+        ->name('management.mis.presets.destroy');
 
     // Reports & CSV export
     Route::get('/reports', [ReportsPortalController::class, 'index'])

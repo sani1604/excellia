@@ -18,7 +18,7 @@ class AiPortalController extends Controller
     public function assist(Request $request): JsonResponse
     {
         $validated = $request->validate([
-            'action' => ['required', 'string', 'in:task_instructions,review_feedback,teacher_outline'],
+            'action' => ['required', 'string', 'in:task_instructions,review_feedback,teacher_outline,management_summary'],
             'document_type' => ['nullable', 'string', 'max:160'],
             'subject' => ['nullable', 'string', 'max:160'],
             'class_name' => ['nullable', 'string', 'max:160'],

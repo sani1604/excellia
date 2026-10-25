@@ -78,6 +78,7 @@ Route::middleware(['active.user'])->group(function () {
 
     // Reports, Notifications, Rules, Settings & Audit
     Route::get('/reports/dashboard', [ReportGovernanceApiController::class, 'dashboard'])->middleware('permission:reports.view_own|reports.view_scope|reports.view_school');
+    Route::get('/reports/management-mis', [ReportGovernanceApiController::class, 'managementMis'])->middleware('permission:reports.view_scope|reports.view_school');
     Route::get('/reports/class-wise', [ReportGovernanceApiController::class, 'classWise'])->middleware('permission:reports.view_scope|reports.view_school');
     Route::get('/reports/teacher-wise', [ReportGovernanceApiController::class, 'teacherWise'])->middleware('permission:reports.view_own|reports.view_scope|reports.view_school');
     Route::get('/reports/subject-wise', [ReportGovernanceApiController::class, 'subjectWise'])->middleware('permission:reports.view_scope|reports.view_school');

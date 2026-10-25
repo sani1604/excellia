@@ -74,6 +74,10 @@
         </form>
 
         <div class="flex flex-wrap items-center gap-2">
+            <a href="{{ route('management.mis', ['academic_year_id' => $selectedYearId]) }}"
+               class="px-4 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-semibold shadow-2xs">
+                Executive Charts & Custom MIS →
+            </a>
             @if(auth()->user()->hasPermission('tasks.create'))
                 <a href="{{ route('tasks.manage') }}" class="px-4 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-semibold shadow-2xs">
                     + Assign Tasks
@@ -111,6 +115,86 @@
             <div class="text-xs text-indigo-100 mt-1">{{ $summary['submitted'] }} of {{ $summary['expected'] }} submitted</div>
         </div>
     </div>
+
+    <!-- Visual Charts Snapshot right on Leadership & Management Dashboard -->
+    @if(!empty($executiveOverview['charts']))
+        <div class="grid grid-cols-1 lg:grid-cols-12 gap-6">
+            <div class="lg:col-span-5 bg-white rounded-2xl border border-slate-200 p-5 flex flex-col justify-between">
+                <div class="flex items-center justify-between gap-2 mb-3">
+                    <div>
+                        <h2 class="text-base font-bold text-slate-900">Submission Status Pie</h2>
+                        <p class="text-xs text-slate-500">Live breakdown of {{ $summary['expected'] }} assigned tasks</p>
+                    </div>
+                    <a href="{{ route('management.mis', ['academic_year_id' => $selectedYearId]) }}" class="text-xs font-semibold text-indigo-600 hover:underline">All 6 Charts →</a>
+                </div>
+                <div class="relative h-56 flex items-center justify-center">
+                    <canvas id="dashStatusPieChart"></canvas>
+                </div>
+            </div>
+
+            <div class="lg:col-span-7 bg-white rounded-2xl border border-slate-200 p-5 flex flex-col justify-between">
+                <div class="flex items-center justify-between gap-2 mb-3">
+                    <div>
+                        <h2 class="text-base font-bold text-slate-900">Progress by School Wing (Bar Chart)</h2>
+                        <p class="text-xs text-slate-500">Approved vs Waiting Check vs Late across stages</p>
+                    </div>
+                    <a href="{{ route('management.mis', ['academic_year_id' => $selectedYearId, 'group_by' => 'stage']) }}#custom-mis-builder"
+                       class="text-xs font-semibold text-emerald-700 hover:underline">Custom MIS Query →</a>
+                </div>
+                <div class="relative h-56">
+                    <canvas id="dashStageBarChart"></canvas>
+                </div>
+            </div>
+        </div>
+
+        <script>
+            (function () {
+                function bootDashCharts() {
+                    if (!window.renderExcelliaChart) return;
+                    const statusDist = @js($executiveOverview['charts']['status_distribution']);
+                    const stageRows = @js($executiveOverview['charts']['stage_breakdown']);
+
+                    window.renderExcelliaChart('dashStatusPieChart', {
+                        type: 'doughnut',
+                        data: {
+                            labels: statusDist.labels,
+                            datasets: [{
+                                data: statusDist.counts,
+                                backgroundColor: statusDist.colors,
+                                borderWidth: 2,
+                                borderColor: '#ffffff'
+                            }]
+                        },
+                        options: {
+                            responsive: true,
+                            maintainAspectRatio: false,
+                            cutout: '58%',
+                            plugins: { legend: { position: 'right' } }
+                        }
+                    });
+
+                    window.renderExcelliaChart('dashStageBarChart', {
+                        type: 'bar',
+                        data: {
+                            labels: stageRows.map(r => r.label.replace(/\s*\(.*\)/, '')),
+                            datasets: [
+                                { label: 'Approved', data: stageRows.map(r => r.approved), backgroundColor: '#10b981', borderRadius: 6 },
+                                { label: 'Waiting Check', data: stageRows.map(r => r.pending_review), backgroundColor: '#0ea5e9', borderRadius: 6 },
+                                { label: 'Late', data: stageRows.map(r => r.overdue), backgroundColor: '#f43f5e', borderRadius: 6 }
+                            ]
+                        },
+                        options: {
+                            responsive: true,
+                            maintainAspectRatio: false,
+                            scales: { y: { beginAtZero: true, ticks: { precision: 0 } } }
+                        }
+                    });
+                }
+                if (document.readyState === 'complete') bootDashCharts();
+                else window.addEventListener('load', bootDashCharts);
+            })();
+        </script>
+    @endif
 
     <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
         <!-- Files Waiting for Check -->

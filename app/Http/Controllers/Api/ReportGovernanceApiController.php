@@ -10,6 +10,7 @@ use App\Models\NotificationLog;
 use App\Models\NotificationRule;
 use App\Models\SystemSetting;
 use App\Services\AuditService;
+use App\Services\ManagementMisService;
 use App\Services\OverdueEscalationService;
 use App\Services\ReportingService;
 use Illuminate\Http\JsonResponse;
@@ -19,9 +20,20 @@ class ReportGovernanceApiController extends Controller
 {
     public function __construct(
         private readonly ReportingService $reporting,
+        private readonly ManagementMisService $managementMis,
         private readonly OverdueEscalationService $overdueService,
         private readonly AuditService $audit,
     ) {}
+
+    public function managementMis(Request $request): JsonResponse
+    {
+        return response()->json([
+            'data' => [
+                'overview' => $this->managementMis->executiveOverview($request->user(), $request->all()),
+                'custom_mis' => $this->managementMis->runCustomMis($request->user(), $request->all()),
+            ],
+        ]);
+    }
 
     public function dashboard(Request $request): JsonResponse
     {

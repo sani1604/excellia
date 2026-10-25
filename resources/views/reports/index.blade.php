@@ -26,10 +26,18 @@
             @endforeach
         </div>
 
-        <a href="{{ route('reports.export', $filters) }}"
-           class="px-4 py-2.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-white text-sm font-semibold">
-            Download Excel (CSV)
-        </a>
+        <div class="flex flex-wrap items-center gap-2">
+            @if(auth()->user()->hasPermission('reports.view_scope') || auth()->user()->hasPermission('reports.view_school'))
+                <a href="{{ route('management.mis', ['academic_year_id' => $filters['academic_year_id'] ?? null]) }}"
+                   class="px-4 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-semibold">
+                    Charts & Custom MIS Builder →
+                </a>
+            @endif
+            <a href="{{ route('reports.export', $filters) }}"
+               class="px-4 py-2.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-white text-sm font-semibold">
+                Download Excel (CSV)
+            </a>
+        </div>
     </div>
 
     <!-- Clean Simple Filter Bar -->

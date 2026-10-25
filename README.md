@@ -34,9 +34,12 @@ All secrets (API keys, OAuth secrets, SMTP passwords) are stored encrypted at re
 5. **AI Work-Saver — OpenRouter (`?tab=ai`)**: **Super Admin Master Enable/Disable** switch, separate Teacher and Coordinator/Leadership role toggles, encrypted OpenRouter API key, model selector, and one-click AI drafting buttons for Teacher outlines/notes, Coordinator task instructions, and Review feedback.
 6. **Alert & Escalation Rules (`?tab=rules`)**: Event channel toggles (`IN_APP`, `EMAIL`, `WHATSAPP`) and IST timezone-aware `excellia:process-overdue` escalation rules (`L1` Coordinator → `L2` Headmistress/Principal → `L3` Principal/Director).
 
-### 5. Reconciled Reports & Mobile-First School UI
-- **Reports & CSV Export (`/reports`)**: Class-wise, Teacher-wise, Subject-wise, and Delay/Escalation reports excluding `CANCELLED` tasks from expected denominators and reconciling 1:1 with task-level rows.
-- **Mobile & Desktop Responsive**: Sticky mobile header with slide-over navigation drawer, touch-friendly controls, scrollable tab bars, and responsive card/table layouts.
+### 5. Executive Management Dashboard, Visual Charts & Custom MIS Builder (`/management-mis`)
+- **Whole-School Visual Analytics (Bundled Chart.js)**: Interactive **Pie / Doughnut Chart** (Status Distribution), **Wing Stacked Bar Chart** (`Pre-Primary` to `Senior Secondary`), **Class-wise Bar Chart**, **Document Category Horizontal Bar Chart**, **Teacher Performance Bar Chart**, and **Escalation Funnel / Monthly Line Trend Chart** — plus quick status & wing charts directly on `/dashboard`.
+- **Customized Report MIS — "Mentioned Query" + "Select & Do"**:
+  - **Plain-English Mentioned Query**: Type natural queries (e.g. *"Class X Mathematics by teacher pie chart"*, *"Teachers with completion below 80% doughnut chart"*, *"Primary wing overdue by class"*) to auto-apply filters, pivots, thresholds, and chart styles.
+  - **Select & Do Multi-Dimensional Builder**: Group/pivot across 9 dimensions (`Task Register`, `Wing`, `Class & Section`, `Teacher`, `Subject`, `Document Type`, `Status`, `Reviewer`, `Escalation`), apply 12 filters + completion % thresholds, pick any of 23 custom columns, save/pin named MIS presets, print/save PDF, and stream custom Excel CSV (`/management-mis/export`) or JSON (`/api/reports/management-mis`).
+- **Standard Reconciled Reports (`/reports`) & Mobile-First School UI**: Class-wise, Teacher-wise, Subject-wise, and Delay/Escalation reports excluding `CANCELLED` tasks from expected denominators, plus sticky mobile drawer navigation across phones, tablets, and desktops.
 
 ---
 

@@ -107,6 +107,15 @@
                 @endif
             @endif
 
+            @if($authUser && ($authUser->hasPermission('reports.view_scope') || $authUser->hasPermission('reports.view_school')))
+                <div class="pt-4 pb-1 px-3.5 text-xs font-semibold uppercase tracking-wider text-slate-400">Management & Analytics</div>
+                <a href="{{ route('management.mis') }}"
+                   class="flex items-center justify-between px-3.5 py-2.5 rounded-xl font-medium transition {{ request()->routeIs('management.mis*') ? 'bg-indigo-50 text-indigo-700 font-semibold' : 'text-slate-700 hover:bg-slate-100' }}">
+                    <span>Management MIS & Charts</span>
+                    <span class="text-[10px] font-bold uppercase px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-800">Charts</span>
+                </a>
+            @endif
+
             @if($authUser && ($authUser->hasPermission('reports.view_own') || $authUser->hasPermission('reports.view_scope') || $authUser->hasPermission('reports.view_school')))
                 <a href="{{ route('reports.index') }}"
                    class="flex items-center px-3.5 py-2.5 rounded-xl font-medium transition {{ request()->routeIs('reports.*') ? 'bg-indigo-50 text-indigo-700 font-semibold' : 'text-slate-700 hover:bg-slate-100' }}">

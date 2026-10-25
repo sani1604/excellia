@@ -153,6 +153,17 @@ class AiAssistantService
     {
         $schoolTone = 'You are a warm, practical K-12 school academic coordinator assistant at Excellia School (India, CBSE/NCERT aligned). Write clear, concise, non-technical plain text without markdown code fences.';
 
+        if ($action === 'management_summary') {
+            $stats = (string) ($ctx['keywords'] ?? 'School submission metrics');
+            $userPrompt = "Based on these Excellia School academic submission metrics ({$stats}), write a crisp 3-bullet executive briefing for the School Director & Principal highlighting: 1) Overall progress, 2) Key bottleneck/overdue area, and 3) Immediate recommended action. Keep under 100 words.";
+            $fallback = "Executive Briefing:\n"
+                . "• Overall Progress: {$stats}\n"
+                . "• Priority Attention: Focus follow-ups on overdue tasks and pending coordinator reviews to clear bottlenecks before weekend escalation.\n"
+                . "• Recommended Next Step: Trigger targeted WhatsApp/portal reminders from the Late Submissions screen and review wing-wise completion.";
+
+            return [$schoolTone, $userPrompt, $fallback];
+        }
+
         if ($action === 'task_instructions') {
             $docType = (string) ($ctx['document_type'] ?? 'Academic Document');
             $subject = (string) ($ctx['subject'] ?? 'All Subjects');
