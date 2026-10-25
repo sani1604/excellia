@@ -1,12 +1,5 @@
 import './bootstrap';
-import Chart from 'chart.js/auto';
-
-window.Chart = Chart;
-
-Chart.defaults.font.family = "'Instrument Sans', ui-sans-serif, system-ui, sans-serif";
-Chart.defaults.color = '#475569';
-Chart.defaults.plugins.legend.labels.usePointStyle = true;
-Chart.defaults.plugins.legend.labels.boxWidth = 10;
+import { ExcelliaChart } from './excellia-charts';
 
 window.excelliaCharts = window.excelliaCharts || {};
 
@@ -18,7 +11,7 @@ window.renderExcelliaChart = function (canvasId, config) {
     if (window.excelliaCharts[canvasId]) {
         window.excelliaCharts[canvasId].destroy();
     }
-    const instance = new Chart(el, config);
+    const instance = new ExcelliaChart(el, config);
     window.excelliaCharts[canvasId] = instance;
     return instance;
 };
