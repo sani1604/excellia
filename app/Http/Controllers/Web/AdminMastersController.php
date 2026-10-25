@@ -161,15 +161,25 @@ class AdminMastersController extends Controller
             'academic_year_id' => ['nullable', 'integer', 'exists:academic_years,id'],
             'scope_type' => ['required', 'string', 'in:SCHOOL,STAGE,CLASS,SECTION,SUBJECT,TEACHER'],
             'scope_id' => ['nullable', 'integer'],
+            'class_scope_id' => ['nullable', 'integer', 'exists:classes,id'],
+            'section_scope_id' => ['nullable', 'integer', 'exists:sections,id'],
+            'subject_scope_id' => ['nullable', 'integer', 'exists:subjects,id'],
             'scope_value' => ['nullable', 'string', 'max:64'],
         ]);
+
+        $resolvedScopeId = $validated['scope_id'] ?? match ($validated['scope_type']) {
+            'CLASS' => $validated['class_scope_id'] ?? null,
+            'SECTION' => $validated['section_scope_id'] ?? null,
+            'SUBJECT' => $validated['subject_scope_id'] ?? null,
+            default => null,
+        };
 
         $scope = UserScopeAssignment::query()->create([
             'user_id' => $validated['user_id'],
             'academic_year_id' => $validated['academic_year_id'] ?? null,
             'scope_type' => $validated['scope_type'],
-            'scope_id' => $validated['scope_id'] ?? null,
-            'scope_value' => $validated['scope_value'] ?? null,
+            'scope_id' => $resolvedScopeId,
+            'scope_value' => $validated['scope_type'] === 'STAGE' ? ($validated['scope_value'] ?? null) : null,
             'can_review' => $request->boolean('can_review'),
             'can_access_restricted' => $request->boolean('can_access_restricted'),
             'is_active' => true,
@@ -178,7 +188,7 @@ class AdminMastersController extends Controller
 
         $this->audit->log('scope.assigned', 'user_scope_assignment', $scope->id, null, $scope->toArray(), $request->user());
 
-        return back()->with('success', 'User scope assignment added.');
+        return back()->with('success', 'Access scope saved successfully.');
     }
 
     public function revokeScopeAssignment(Request $request, UserScopeAssignment $scopeAssignment): RedirectResponse

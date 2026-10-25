@@ -374,7 +374,12 @@ class MasterDataService
 
                 $this->audit->log('allocation.updated', 'teaching_allocation', $existing->id, $before, $existing->fresh()->toArray(), $actor);
 
-                return $existing->fresh(['academicYear', 'schoolClass', 'section', 'subject', 'teacher']);
+                $refreshed = $existing->fresh(['academicYear', 'schoolClass', 'section', 'subject', 'teacher']);
+                if ($refreshed->is_active && $refreshed->subject_id && $refreshed->isVerified()) {
+                    $this->syncAllocationDriveMappings($refreshed, $actor);
+                }
+
+                return $refreshed;
             }
 
             $verifiedNow = ! empty($data['mark_verified']) ? now() : null;
@@ -395,7 +400,12 @@ class MasterDataService
 
             $this->audit->log('allocation.created', 'teaching_allocation', $allocation->id, null, $allocation->toArray(), $actor);
 
-            return $allocation->fresh(['academicYear', 'schoolClass', 'section', 'subject', 'teacher']);
+            $freshAlloc = $allocation->fresh(['academicYear', 'schoolClass', 'section', 'subject', 'teacher']);
+            if ($freshAlloc->is_active && $freshAlloc->subject_id && $freshAlloc->isVerified()) {
+                $this->syncAllocationDriveMappings($freshAlloc, $actor);
+            }
+
+            return $freshAlloc;
         });
     }
 
@@ -409,7 +419,77 @@ class MasterDataService
 
         $this->audit->log('allocation.verified', 'teaching_allocation', $allocation->id, $before, $allocation->fresh()->toArray(), $actor);
 
-        return $allocation->fresh();
+        $fresh = $allocation->fresh(['academicYear', 'schoolClass', 'section', 'subject', 'teacher']);
+        if ($fresh->is_active && $fresh->subject_id) {
+            $this->syncAllocationDriveMappings($fresh, $actor);
+        }
+
+        return $fresh;
+    }
+
+    /**
+     * Automatically ensures canonical Google Drive folder mappings exist for a verified subject allocation
+     * so school staff do not need to manually enter Drive folder IDs.
+     */
+    public function syncAllocationDriveMappings(TeachingAllocation $alloc, User $actor): void
+    {
+        if ((bool) config('excellia.drive.simulate_outage', false) || config('excellia.drive.mode') === 'google_api') {
+            return;
+        }
+
+        $alloc->loadMissing(['academicYear', 'schoolClass', 'section', 'subject', 'teacher']);
+        if (! $alloc->teacher || ! $alloc->subject || ! $alloc->academicYear) {
+            return;
+        }
+
+        $docTypes = DocumentType::query()->where('is_active', true)->orderBy('display_order')->get();
+        $classLabel = $alloc->schoolClass?->drive_folder_label ?: ($alloc->schoolClass?->name ?? 'Class');
+        $sectionLabel = 'Section ' . ($alloc->section?->name ?? '');
+        $subjectTeacherLabel = $alloc->subject->name . ' – ' . $alloc->teacher->full_name;
+
+        foreach ($docTypes as $dt) {
+            $exists = DriveFolderMapping::query()
+                ->where('academic_year_id', $alloc->academic_year_id)
+                ->where('class_id', $alloc->class_id)
+                ->where('section_id', $alloc->section_id)
+                ->where('subject_id', $alloc->subject_id)
+                ->where('teacher_user_id', $alloc->teacher_user_id)
+                ->where('document_type_id', $dt->id)
+                ->exists();
+
+            if ($exists) {
+                continue;
+            }
+
+            $displayPath = "{$classLabel} / {$sectionLabel} / {$subjectTeacherLabel} / {$dt->folder_name}";
+            $seedSlug = sprintf(
+                '%s_%s_%s_%s_T%d_%s',
+                preg_replace('/\W+/', '', $alloc->academicYear->name),
+                $alloc->schoolClass?->code ?? $alloc->class_id,
+                $alloc->section?->name ?? $alloc->section_id,
+                $alloc->subject?->code ?? $alloc->subject_id,
+                $alloc->teacher_user_id,
+                $dt->folder_code
+            );
+
+            $folderId = $this->driveService->provisionFolder($dt->folder_name, null, $seedSlug);
+
+            DriveFolderMapping::query()->create([
+                'academic_year_id' => $alloc->academic_year_id,
+                'class_id' => $alloc->class_id,
+                'section_id' => $alloc->section_id,
+                'subject_id' => $alloc->subject_id,
+                'teacher_user_id' => $alloc->teacher_user_id,
+                'document_type_id' => $dt->id,
+                'drive_folder_id' => $folderId,
+                'drive_folder_name' => $displayPath,
+                'drive_folder_url' => "https://drive.google.com/drive/folders/{$folderId}",
+                'access_policy_key' => $dt->access_policy_key ?: 'STANDARD_ACADEMIC',
+                'is_active' => true,
+                'verified_by' => $actor->id,
+                'verified_at' => now(),
+            ]);
+        }
     }
 
     public function saveDriveMapping(array $data, User $actor, ?DriveFolderMapping $existing = null): DriveFolderMapping

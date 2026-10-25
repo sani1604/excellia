@@ -1,84 +1,75 @@
 @extends('layouts.app')
 
-@section('title', 'Academic Oversight Dashboard')
-@section('heading', 'Academic Compliance & Monitoring Dashboard')
-@section('subheading', 'Real-time submission, review, approval, overdue, and escalation telemetry reconciled against task records')
+@section('title', 'School Overview')
+@section('heading', 'School Submission Overview')
+@section('subheading', 'Track submitted files, pending checks, and late items across your classes.')
 
 @section('content')
     <div class="flex flex-wrap items-center justify-between gap-4">
         <form method="GET" action="{{ route('dashboard') }}" class="flex items-center gap-2">
-            <label for="academic_year_id" class="text-xs font-medium text-slate-600">Academic Year:</label>
+            <label for="academic_year_id" class="text-sm font-medium text-slate-600">Session:</label>
             <select id="academic_year_id" name="academic_year_id" onchange="this.form.submit()"
-                    class="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium">
+                    class="rounded-xl border border-slate-300 bg-white px-3.5 py-2 text-sm font-medium">
                 @foreach($academicYears as $yr)
                     <option value="{{ $yr->id }}" @selected($selectedYearId == $yr->id)>
-                        {{ $yr->name }} ({{ $yr->status }})
+                        {{ $yr->name }}
                     </option>
                 @endforeach
             </select>
         </form>
 
-        <div class="flex flex-wrap items-center gap-2">
+        <div class="flex flex-wrap items-center gap-2.5">
             @if(auth()->user()->hasPermission('tasks.create'))
-                <a href="{{ route('tasks.manage') }}" class="px-3.5 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-semibold">
-                    + Assign / Generate Tasks
+                <a href="{{ route('tasks.manage') }}" class="px-4 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-semibold shadow-2xs">
+                    + Assign Tasks
                 </a>
             @endif
-            <a href="{{ route('reports.index') }}" class="px-3.5 py-2 rounded-lg bg-white border border-slate-300 hover:bg-slate-50 text-slate-700 text-xs font-semibold">
-                Open Full Reports
+            <a href="{{ route('reports.index') }}" class="px-4 py-2.5 rounded-xl bg-white border border-slate-300 hover:bg-slate-50 text-slate-700 text-sm font-semibold">
+                View Reports
             </a>
         </div>
     </div>
 
-    <!-- Leadership / Coordinator KPI Strip (Sections 6.2 & 6.3) -->
-    <div class="grid grid-cols-2 sm:grid-cols-4 xl:grid-cols-8 gap-3.5">
-        <div class="bg-white rounded-xl border border-slate-200 p-4">
-            <div class="text-[11px] font-medium text-slate-500">Expected Tasks</div>
-            <div class="text-2xl font-bold text-slate-900 mt-1">{{ $summary['expected'] }}</div>
+    <!-- 4 Clear Summary Cards (Instead of 8 tiny boxes) -->
+    <div class="grid grid-cols-2 lg:grid-cols-4 gap-4">
+        <div class="bg-white rounded-2xl border border-slate-200 p-5">
+            <div class="text-sm font-medium text-slate-500">Total Assigned</div>
+            <div class="text-3xl font-bold text-slate-900 mt-1">{{ $summary['expected'] }}</div>
+            <div class="text-xs text-emerald-700 font-medium mt-1">{{ $summary['approved'] }} approved · {{ $summary['returned'] }} returned</div>
         </div>
-        <div class="bg-white rounded-xl border border-slate-200 p-4">
-            <div class="text-[11px] font-medium text-slate-500">Submitted</div>
-            <div class="text-2xl font-bold text-slate-800 mt-1">{{ $summary['submitted'] }}</div>
-        </div>
-        <div class="bg-white rounded-xl border border-emerald-200 p-4">
-            <div class="text-[11px] font-medium text-emerald-700">Approved</div>
-            <div class="text-2xl font-bold text-emerald-600 mt-1">{{ $summary['approved'] }}</div>
-        </div>
-        <div class="bg-white rounded-xl border border-sky-200 p-4">
-            <div class="text-[11px] font-medium text-sky-700">Pending Review</div>
-            <div class="text-2xl font-bold text-sky-600 mt-1">{{ $summary['pending_review'] }}</div>
-        </div>
-        <div class="bg-white rounded-xl border border-amber-200 p-4">
-            <div class="text-[11px] font-medium text-amber-700">Returned</div>
-            <div class="text-2xl font-bold text-amber-600 mt-1">{{ $summary['returned'] }}</div>
-        </div>
-        <div class="bg-white rounded-xl border border-rose-200 p-4">
-            <div class="text-[11px] font-medium text-rose-700">Overdue</div>
-            <div class="text-2xl font-bold text-rose-600 mt-1">{{ $summary['overdue'] }}</div>
-        </div>
-        <div class="bg-white rounded-xl border border-red-200 p-4">
-            <div class="text-[11px] font-medium text-red-700">Escalated</div>
-            <div class="text-2xl font-bold text-red-600 mt-1">{{ $summary['escalated'] }}</div>
-        </div>
-        <div class="bg-indigo-600 rounded-xl p-4 text-white">
-            <div class="text-[11px] font-medium text-indigo-100">Completion Rate</div>
-            <div class="text-2xl font-bold mt-1">{{ number_format($summary['completion_rate'], 1) }}%</div>
+
+        <a href="{{ route('reviews.queue') }}" class="bg-white rounded-2xl border border-sky-200 p-5 hover:border-sky-400 transition">
+            <div class="text-sm font-medium text-sky-700">Files Waiting for Check</div>
+            <div class="text-3xl font-bold text-sky-600 mt-1">{{ $summary['pending_review'] }}</div>
+            <div class="text-xs text-slate-500 mt-1">Tap to review & approve</div>
+        </a>
+
+        <a href="{{ route('overdue.monitor') }}" class="bg-white rounded-2xl border border-rose-200 p-5 hover:border-rose-400 transition">
+            <div class="text-sm font-medium text-rose-700">Late Submissions</div>
+            <div class="text-3xl font-bold text-rose-600 mt-1">{{ $summary['overdue'] }}</div>
+            <div class="text-xs text-slate-500 mt-1">{{ $summary['escalated'] }} escalated for attention</div>
+        </a>
+
+        <div class="bg-indigo-600 rounded-2xl p-5 text-white">
+            <div class="text-sm font-medium text-indigo-100">Completion Rate</div>
+            <div class="text-3xl font-bold mt-1">{{ number_format($summary['completion_rate'], 0) }}%</div>
+            <div class="text-xs text-indigo-100 mt-1">{{ $summary['submitted'] }} of {{ $summary['expected'] }} submitted</div>
         </div>
     </div>
 
     <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        <!-- Pending Review Queue Snapshot -->
-        <div class="bg-white rounded-xl border border-slate-200 overflow-hidden">
-            <div class="px-5 py-4 border-b border-slate-200 flex items-center justify-between">
-                <h2 class="text-sm font-semibold text-slate-900">Awaiting Review in Scope</h2>
-                <a href="{{ route('reviews.queue') }}" class="text-xs font-medium text-indigo-600 hover:underline">Open Queue</a>
+        <!-- Files Waiting for Check -->
+        <div class="bg-white rounded-2xl border border-slate-200 overflow-hidden">
+            <div class="px-6 py-4 border-b border-slate-100 flex items-center justify-between">
+                <h2 class="text-base font-bold text-slate-900">Files Waiting for Your Check</h2>
+                <a href="{{ route('reviews.queue') }}" class="text-sm font-semibold text-indigo-600 hover:underline">See all</a>
             </div>
             <div class="divide-y divide-slate-100">
                 @forelse($pendingReviewTasks as $task)
                     <div class="p-4 flex items-center justify-between gap-4 hover:bg-slate-50">
                         <div>
-                            <div class="text-sm font-medium text-slate-900">{{ $task->title }}</div>
-                            <div class="text-xs text-slate-500 mt-0.5">
+                            <div class="text-sm font-semibold text-slate-900">{{ $task->title }}</div>
+                            <div class="text-sm text-slate-500 mt-0.5">
                                 {{ $task->assignedTeacher?->full_name }} ·
                                 {{ $task->teachingAllocation?->schoolClass?->name }}-{{ $task->teachingAllocation?->section?->name }} ·
                                 {{ $task->teachingAllocation?->subject?->name }}
@@ -86,29 +77,29 @@
                         </div>
                         @if($task->submission)
                             <a href="{{ route('reviews.show', $task->submission) }}"
-                               class="px-3 py-1.5 rounded-lg bg-indigo-50 hover:bg-indigo-100 text-indigo-700 text-xs font-semibold shrink-0">
-                                Inspect
+                               class="px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-semibold shrink-0">
+                                Check File
                             </a>
                         @endif
                     </div>
                 @empty
-                    <div class="p-6 text-center text-xs text-slate-500">No submissions currently awaiting review in your scope.</div>
+                    <div class="p-8 text-center text-sm text-slate-500">All caught up! No files waiting for check.</div>
                 @endforelse
             </div>
         </div>
 
-        <!-- Active Delays & Escalations -->
-        <div class="bg-white rounded-xl border border-slate-200 overflow-hidden">
-            <div class="px-5 py-4 border-b border-slate-200 flex items-center justify-between">
-                <h2 class="text-sm font-semibold text-slate-900">Overdue & Escalated Items</h2>
-                <a href="{{ route('overdue.monitor') }}" class="text-xs font-medium text-rose-600 hover:underline">Overdue Monitor</a>
+        <!-- Late Submissions -->
+        <div class="bg-white rounded-2xl border border-slate-200 overflow-hidden">
+            <div class="px-6 py-4 border-b border-slate-100 flex items-center justify-between">
+                <h2 class="text-base font-bold text-slate-900">Late Submissions</h2>
+                <a href="{{ route('overdue.monitor') }}" class="text-sm font-semibold text-rose-600 hover:underline">Send reminders</a>
             </div>
             <div class="divide-y divide-slate-100">
                 @forelse($overdueAndEscalated as $task)
                     <div class="p-4 flex items-center justify-between gap-4 hover:bg-slate-50">
                         <div>
-                            <div class="text-sm font-medium text-slate-900">{{ $task->title }}</div>
-                            <div class="text-xs text-slate-500 mt-0.5">
+                            <div class="text-sm font-semibold text-slate-900">{{ $task->title }}</div>
+                            <div class="text-sm text-slate-500 mt-0.5">
                                 {{ $task->assignedTeacher?->full_name }} ·
                                 {{ $task->teachingAllocation?->schoolClass?->name }}-{{ $task->teachingAllocation?->section?->name }} ·
                                 Due {{ $task->due_at?->format('d M Y') }}
@@ -119,44 +110,42 @@
                         </div>
                     </div>
                 @empty
-                    <div class="p-6 text-center text-xs text-slate-500">Zero overdue items in scope.</div>
+                    <div class="p-8 text-center text-sm text-slate-500">No late submissions right now.</div>
                 @endforelse
             </div>
         </div>
     </div>
 
-    <!-- Compliance Breakdown by Document Type -->
-    <div class="bg-white rounded-xl border border-slate-200 overflow-hidden">
-        <div class="px-5 py-4 border-b border-slate-200">
-            <h2 class="text-sm font-semibold text-slate-900">Compliance by Academic Document Category</h2>
+    <!-- Simple Progress by Document Category -->
+    <div class="bg-white rounded-2xl border border-slate-200 overflow-hidden">
+        <div class="px-6 py-4 border-b border-slate-100">
+            <h2 class="text-base font-bold text-slate-900">Progress by Document Type</h2>
         </div>
         <div class="overflow-x-auto">
             <table class="min-w-full divide-y divide-slate-200 text-sm">
                 <thead class="bg-slate-50 text-xs text-slate-500 uppercase">
                     <tr>
-                        <th class="px-4 py-3 text-left">Document Category</th>
-                        <th class="px-4 py-3 text-right">Expected</th>
-                        <th class="px-4 py-3 text-right">Approved</th>
-                        <th class="px-4 py-3 text-right">Pending Review</th>
-                        <th class="px-4 py-3 text-right">Returned</th>
-                        <th class="px-4 py-3 text-right">Overdue</th>
-                        <th class="px-4 py-3 text-right">Completion %</th>
+                        <th class="px-5 py-3 text-left">Document Type</th>
+                        <th class="px-5 py-3 text-right">Assigned</th>
+                        <th class="px-5 py-3 text-right">Approved</th>
+                        <th class="px-5 py-3 text-right">Waiting Check</th>
+                        <th class="px-5 py-3 text-right">Late</th>
+                        <th class="px-5 py-3 text-right">Completed</th>
                     </tr>
                 </thead>
                 <tbody class="divide-y divide-slate-100">
                     @forelse($byDocumentType as $row)
                         <tr>
-                            <td class="px-4 py-3 font-medium text-slate-900">{{ $row['document_type'] }}</td>
-                            <td class="px-4 py-3 text-right">{{ $row['expected'] }}</td>
-                            <td class="px-4 py-3 text-right text-emerald-700 font-semibold">{{ $row['approved'] }}</td>
-                            <td class="px-4 py-3 text-right text-sky-700">{{ $row['pending_review'] }}</td>
-                            <td class="px-4 py-3 text-right text-amber-700">{{ $row['returned'] }}</td>
-                            <td class="px-4 py-3 text-right text-rose-700 font-semibold">{{ $row['overdue'] }}</td>
-                            <td class="px-4 py-3 text-right font-semibold">{{ number_format($row['completion_rate'], 1) }}%</td>
+                            <td class="px-5 py-3.5 font-medium text-slate-900">{{ $row['document_type'] }}</td>
+                            <td class="px-5 py-3.5 text-right">{{ $row['expected'] }}</td>
+                            <td class="px-5 py-3.5 text-right text-emerald-700 font-semibold">{{ $row['approved'] }}</td>
+                            <td class="px-5 py-3.5 text-right text-sky-700">{{ $row['pending_review'] }}</td>
+                            <td class="px-5 py-3.5 text-right text-rose-700 font-semibold">{{ $row['overdue'] }}</td>
+                            <td class="px-5 py-3.5 text-right font-bold">{{ number_format($row['completion_rate'], 0) }}%</td>
                         </tr>
                     @empty
                         <tr>
-                            <td colspan="7" class="px-4 py-6 text-center text-xs text-slate-500">No task records found for selected year.</td>
+                            <td colspan="6" class="px-5 py-8 text-center text-sm text-slate-500">No tasks assigned for this session yet.</td>
                         </tr>
                     @endforelse
                 </tbody>

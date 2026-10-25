@@ -292,4 +292,75 @@ class GovernanceSsoWhatsAppCompletionTest extends TestCase
         ])->assertRedirect();
         $this->assertSame($afterFirstProvision, DriveFolderMapping::query()->count());
     }
+
+    public function test_auto_drive_mapping_on_allocation_and_dropdown_scope_assignment_and_simple_ui(): void
+    {
+        $admin = User::query()->where('email', 'admin@excelliaschool.edu.in')->firstOrFail();
+        $coord = User::query()->where('email', 'coord.primary@excelliaschool.edu.in')->firstOrFail();
+        $priya = User::query()->where('email', 'priya.menon@excelliaschool.edu.in')->firstOrFail();
+        $year = AcademicYear::current();
+        $class8 = SchoolClass::query()->where('name', 'Class VIII')->firstOrFail();
+        $section8A = Section::query()
+            ->where('academic_year_id', $year->id)
+            ->where('class_id', $class8->id)
+            ->firstOrFail();
+        $english = Subject::query()->where('code', 'ENG')->firstOrFail();
+
+        // 1. Assigning a verified subject teacher automatically provisions Drive folder mappings (00-05)
+        $this->actingAs($admin)->post('/admin/allocations', [
+            'academic_year_id' => $year->id,
+            'class_id' => $class8->id,
+            'section_id' => $section8A->id,
+            'subject_id' => $english->id,
+            'teacher_user_id' => $priya->id,
+            'mark_verified' => '1',
+        ])->assertRedirect();
+
+        $autoCreatedMappings = DriveFolderMapping::query()
+            ->where('academic_year_id', $year->id)
+            ->where('class_id', $class8->id)
+            ->where('section_id', $section8A->id)
+            ->where('subject_id', $english->id)
+            ->where('teacher_user_id', $priya->id)
+            ->count();
+
+        $activeDocTypesCount = DocumentType::query()->where('is_active', true)->count();
+        $this->assertSame($activeDocTypesCount, $autoCreatedMappings);
+
+        // 2. Assigning Coordinator supervision via friendly Class dropdown (class_scope_id, no raw ID input)
+        $this->actingAs($admin)->post('/admin/scopes', [
+            'user_id' => $coord->id,
+            'academic_year_id' => $year->id,
+            'scope_type' => 'CLASS',
+            'class_scope_id' => $class8->id,
+            'can_review' => '1',
+        ])->assertRedirect();
+
+        $this->assertDatabaseHas('user_scope_assignments', [
+            'user_id' => $coord->id,
+            'scope_type' => 'CLASS',
+            'scope_id' => $class8->id,
+            'can_review' => true,
+            'is_active' => true,
+        ]);
+
+        // 3. Render every simplified portal screen across Teacher, Coordinator, and Admin roles cleanly
+        $this->actingAs($priya)->get('/dashboard')->assertOk()->assertSee('Your Tasks');
+        $this->actingAs($priya)->get('/my-work')->assertOk()->assertSee('My Tasks');
+        $this->actingAs($priya)->get('/my-submissions')->assertOk()->assertSee('My Uploaded Files');
+        $this->actingAs($priya)->get('/notifications')->assertOk()->assertSee('Alerts & Messages');
+
+        $this->actingAs($coord)->get('/review-queue')->assertOk()->assertSee('Files to Check');
+        $this->actingAs($coord)->get('/overdue-monitor')->assertOk()->assertSee('Late Submissions');
+        $this->actingAs($coord)->get('/task-management')->assertOk()->assertSee('Assign Tasks to Teachers');
+        $this->actingAs($coord)->get('/reports')->assertOk()->assertSee('Download Excel (CSV)');
+
+        $this->actingAs($admin)->get('/admin/users')->assertOk()->assertSee('Staff Accounts');
+        $this->actingAs($admin)->get('/admin/academics')->assertOk()->assertSee('Assign Teacher to Class');
+        $this->actingAs($admin)->get('/admin/document-types')->assertOk()->assertSee('Document Types');
+        $this->actingAs($admin)->get('/admin/roles')->assertOk()->assertSee('Coordinator Wings & Staff Access');
+        $this->actingAs($admin)->get('/admin/drive-mappings')->assertOk()->assertSee('Automatic Folder Setup is Active');
+        $this->actingAs($admin)->get('/admin/settings')->assertOk()->assertSee('Reminders & School Settings');
+        $this->actingAs($admin)->get('/admin/audit-logs')->assertOk()->assertSee('School Activity History');
+    }
 }

@@ -1,81 +1,66 @@
 @extends('layouts.app')
 
-@section('title', 'My Assigned Tasks')
-@section('heading', 'My Assigned Tasks')
-@section('subheading', 'Task-first submission workspace — class, section, subject, and document type are prefilled automatically')
+@section('title', 'My Tasks')
+@section('heading', 'My Tasks')
+@section('subheading', 'Tap any task below to upload your file.')
 
 @section('content')
     <div class="flex flex-wrap items-center gap-2">
         @php
             $tabs = [
-                '' => 'All Assigned',
-                'pending' => 'Pending (' . $summary['pending_submission'] . ')',
-                'returned' => 'Returned (' . $summary['returned'] . ')',
-                'under_review' => 'Under Review (' . $summary['pending_review'] . ')',
-                'overdue' => 'Overdue (' . $summary['overdue'] . ')',
+                '' => 'All (' . $summary['expected'] . ')',
+                'pending' => 'To Upload (' . $summary['pending_submission'] . ')',
+                'returned' => 'Needs Correction (' . $summary['returned'] . ')',
+                'under_review' => 'Sent for Check (' . $summary['pending_review'] . ')',
+                'overdue' => 'Late (' . $summary['overdue'] . ')',
                 'approved' => 'Approved (' . $summary['approved'] . ')',
             ];
         @endphp
         @foreach($tabs as $key => $label)
             <a href="{{ route('teacher.tasks', $key ? ['filter' => $key] : []) }}"
-               class="px-3.5 py-1.5 rounded-lg text-xs font-semibold border transition {{ $activeFilter === $key ? 'bg-indigo-600 text-white border-indigo-600' : 'bg-white text-slate-700 border-slate-300 hover:bg-slate-50' }}">
+               class="px-4 py-2 rounded-xl text-sm font-semibold border transition {{ $activeFilter === $key ? 'bg-indigo-600 text-white border-indigo-600' : 'bg-white text-slate-700 border-slate-300 hover:bg-slate-50' }}">
                 {{ $label }}
             </a>
         @endforeach
     </div>
 
-    <div class="bg-white rounded-xl border border-slate-200 overflow-hidden">
-        <div class="overflow-x-auto">
-            <table class="min-w-full divide-y divide-slate-200 text-sm">
-                <thead class="bg-slate-50 text-xs text-slate-500 uppercase">
-                    <tr>
-                        <th class="px-4 py-3 text-left">Task</th>
-                        <th class="px-4 py-3 text-left">Class / Section / Subject</th>
-                        <th class="px-4 py-3 text-left">Document Type & Period</th>
-                        <th class="px-4 py-3 text-left">Deadline</th>
-                        <th class="px-4 py-3 text-left">Status</th>
-                        <th class="px-4 py-3 text-right">Action</th>
-                    </tr>
-                </thead>
-                <tbody class="divide-y divide-slate-100">
-                    @forelse($tasks as $task)
-                        <tr class="hover:bg-slate-50">
-                            <td class="px-4 py-3">
-                                <div class="font-medium text-slate-900">{{ $task->title }}</div>
-                                @if($task->submission?->currentVersion?->latestReview?->remarks && $task->workflow_status === 'RETURNED_FOR_CORRECTION')
-                                    <div class="mt-1 text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded px-2 py-1">
-                                        Reviewer Remark: "{{ $task->submission->currentVersion->latestReview->remarks }}"
-                                    </div>
-                                @endif
-                            </td>
-                            <td class="px-4 py-3 text-xs text-slate-700">
-                                <div class="font-semibold">{{ $task->teachingAllocation?->schoolClass?->name }} — Sec {{ $task->teachingAllocation?->section?->name }}</div>
-                                <div class="text-slate-500">{{ $task->teachingAllocation?->subject?->name }}</div>
-                            </td>
-                            <td class="px-4 py-3 text-xs text-slate-700">
-                                <div class="font-medium">{{ $task->documentType?->name }}</div>
-                                <div class="text-slate-500">{{ $task->period_label }}</div>
-                            </td>
-                            <td class="px-4 py-3 text-xs text-slate-700 whitespace-nowrap">
-                                {{ $task->due_at?->timezone(\App\Models\SystemSetting::timezone())->format('d M Y, h:i A') }}
-                            </td>
-                            <td class="px-4 py-3">
-                                @include('partials.status-badge', ['task' => $task])
-                            </td>
-                            <td class="px-4 py-3 text-right whitespace-nowrap">
-                                <a href="{{ route('tasks.show', $task) }}"
-                                   class="inline-flex items-center px-3 py-1.5 rounded-lg text-xs font-semibold {{ $task->canTeacherSubmit() ? 'bg-indigo-600 text-white hover:bg-indigo-700' : 'bg-slate-100 text-slate-700 hover:bg-slate-200' }}">
-                                    {{ $task->workflow_status === 'RETURNED_FOR_CORRECTION' ? 'Resubmit' : ($task->workflow_status === 'NOT_STARTED' ? 'Submit Document' : 'Open Task') }}
-                                </a>
-                            </td>
-                        </tr>
-                    @empty
-                        <tr>
-                            <td colspan="6" class="px-4 py-8 text-center text-xs text-slate-500">No tasks match the selected filter.</td>
-                        </tr>
-                    @endforelse
-                </tbody>
-            </table>
-        </div>
+    <div class="space-y-3">
+        @forelse($tasks as $task)
+            <div class="bg-white rounded-2xl border border-slate-200 p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-4 hover:border-indigo-300 transition">
+                <div class="space-y-1.5">
+                    <div class="flex flex-wrap items-center gap-2.5">
+                        <span class="text-base font-bold text-slate-900">{{ $task->title }}</span>
+                        @include('partials.status-badge', ['task' => $task])
+                    </div>
+
+                    <div class="text-sm text-slate-600">
+                        <strong>{{ $task->teachingAllocation?->schoolClass?->name }} — Section {{ $task->teachingAllocation?->section?->name }}</strong>
+                        · {{ $task->teachingAllocation?->subject?->name }}
+                        · {{ $task->documentType?->name }} ({{ $task->period_label }})
+                    </div>
+
+                    <div class="text-sm text-slate-500">
+                        Due Date: <strong class="text-slate-700">{{ $task->due_at?->timezone(\App\Models\SystemSetting::timezone())->format('d M Y, h:i A') }}</strong>
+                    </div>
+
+                    @if($task->submission?->currentVersion?->latestReview?->remarks && $task->workflow_status === 'RETURNED_FOR_CORRECTION')
+                        <div class="mt-2 text-sm text-amber-950 bg-amber-50 border border-amber-300 rounded-xl px-3.5 py-2.5">
+                            <strong>Coordinator Feedback:</strong> "{{ $task->submission->currentVersion->latestReview->remarks }}"
+                        </div>
+                    @endif
+                </div>
+
+                <div class="shrink-0">
+                    <a href="{{ route('tasks.show', $task) }}"
+                       class="inline-flex items-center justify-center px-5 py-2.5 rounded-xl text-sm font-semibold {{ $task->canTeacherSubmit() ? 'bg-indigo-600 text-white hover:bg-indigo-700 shadow-xs' : 'bg-slate-100 text-slate-700 hover:bg-slate-200' }}">
+                        {{ $task->workflow_status === 'RETURNED_FOR_CORRECTION' ? 'Fix & Upload Again' : ($task->workflow_status === 'NOT_STARTED' ? 'Upload File' : 'View Details') }}
+                    </a>
+                </div>
+            </div>
+        @empty
+            <div class="bg-white rounded-2xl border border-slate-200 p-10 text-center text-sm text-slate-500">
+                No tasks found in this tab.
+            </div>
+        @endforelse
     </div>
 @endsection
