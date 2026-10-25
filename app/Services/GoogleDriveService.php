@@ -8,6 +8,7 @@ use App\Models\DocumentTask;
 use App\Models\DocumentType;
 use App\Models\DriveFolderMapping;
 use App\Models\SubmissionVersion;
+use App\Models\SystemSetting;
 use App\Models\User;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Http;
@@ -17,6 +18,37 @@ use Throwable;
 
 class GoogleDriveService
 {
+    public function activeMode(): string
+    {
+        $cfgMode = (string) config('excellia.drive.mode', 'workspace_sandbox');
+        if ($cfgMode === 'google_api') {
+            return 'google_api';
+        }
+
+        $dbEnabled = SystemSetting::getValue('google_drive_live_enabled', null);
+        if ($dbEnabled !== null) {
+            return ((bool) $dbEnabled) ? 'google_api' : 'workspace_sandbox';
+        }
+
+        return $cfgMode ?: 'workspace_sandbox';
+    }
+
+    public function rootFolderId(): string
+    {
+        return (string) SystemSetting::getValue(
+            'google_drive_root_folder_id',
+            config('excellia.drive.root_folder_id', '1ExcelliaRoot2026_27AcademicSharing')
+        );
+    }
+
+    public function rootFolderName(): string
+    {
+        return (string) SystemSetting::getValue(
+            'google_drive_root_folder_name',
+            config('excellia.drive.root_folder_name', 'EXCELLIA SCHOOL – ACADEMIC SHARING – 2026–27')
+        );
+    }
+
     /**
      * Validates uploaded file format, MIME type, executable blocklist, and max file size server-side.
      */
@@ -36,7 +68,6 @@ class GoogleDriveService
             throw new DomainRuleException("Executable or script files (.{$extension}) are strictly prohibited.");
         }
 
-        // Prevent double-extension tricks like report.php.pdf if inner extension is executable? Allow normal dots, block dangerous trailing patterns
         $blockedMimePrefixes = config('excellia.security.blocked_mime_prefixes', []);
         foreach ($blockedMimePrefixes as $blockedMime) {
             if ($mimeType === $blockedMime || str_starts_with($mimeType, $blockedMime)) {
@@ -118,7 +149,7 @@ class GoogleDriveService
             throw new DomainRuleException("Linked Drive file size must be greater than 0 and within {$documentType->max_file_size_mb} MB.");
         }
 
-        if (config('excellia.drive.mode') === 'google_api') {
+        if ($this->activeMode() === 'google_api') {
             $this->verifyGoogleApiFileAccess($driveFileId);
         }
 
@@ -132,9 +163,6 @@ class GoogleDriveService
         ];
     }
 
-    /**
-     * Resolves active verified Drive folder mapping for a task's academic context, or builds the expected school folder path.
-     */
     public function resolveFolderMappingForTask(DocumentTask $task): ?DriveFolderMapping
     {
         $allocation = $task->relationLoaded('teachingAllocation')
@@ -145,7 +173,6 @@ class GoogleDriveService
             return null;
         }
 
-        // Exact teacher + document type mapping first
         $mapping = DriveFolderMapping::query()
             ->where('academic_year_id', $task->academic_year_id)
             ->where('class_id', $allocation->class_id)
@@ -164,7 +191,6 @@ class GoogleDriveService
             return $mapping;
         }
 
-        // Fallback to subject-root mapping if configured
         return DriveFolderMapping::query()
             ->where('academic_year_id', $task->academic_year_id)
             ->where('class_id', $allocation->class_id)
@@ -186,7 +212,7 @@ class GoogleDriveService
             'teachingAllocation.subject',
         ]);
 
-        $root = config('excellia.drive.root_folder_name', 'EXCELLIA SCHOOL – ACADEMIC SHARING – 2026–27');
+        $root = $this->rootFolderName();
         $classLabel = $task->teachingAllocation?->schoolClass?->drive_folder_label
             ?: ($task->teachingAllocation?->schoolClass?->name ?? 'Class');
         $sectionLabel = 'Section ' . ($task->teachingAllocation?->section?->name ?? '');
@@ -197,9 +223,6 @@ class GoogleDriveService
         return "{$root} / {$classLabel} / {$sectionLabel} / {$subjectName} – {$teacherName} / {$docFolder}";
     }
 
-    /**
-     * Uploads file to mapped Google Drive folder (or private Workspace Sandbox vault), never creating public links.
-     */
     public function storeUploadedSubmissionFile(
         UploadedFile $file,
         DocumentTask $task,
@@ -228,7 +251,7 @@ class GoogleDriveService
 
         $checksum = hash_file('sha256', $file->getRealPath());
 
-        if (config('excellia.drive.mode') === 'google_api') {
+        if ($this->activeMode() === 'google_api') {
             $driveResult = $this->uploadViaGoogleApi($file, $canonicalFileName, $validated['mime_type'], $targetFolderId);
 
             return [
@@ -244,7 +267,6 @@ class GoogleDriveService
             ];
         }
 
-        // Workspace Sandbox mode: private vault storage (not publicly web-accessible) + canonical Drive metadata
         try {
             $disk = config('excellia.drive.local_private_disk', 'local');
             $vaultRelativeDir = sprintf(
@@ -303,21 +325,17 @@ class GoogleDriveService
         return Storage::disk(config('excellia.drive.local_private_disk', 'local'))->exists($version->storage_disk_path);
     }
 
-    /**
-     * Provisions a canonical institutional Google Drive folder (via Drive v3 API in google_api mode,
-     * or deterministic private workspace folder ID in workspace_sandbox mode). Never creates public links.
-     */
     public function provisionFolder(string $folderName, ?string $parentFolderId = null, string $seedSlug = ''): string
     {
         if ((bool) config('excellia.drive.simulate_outage', false)) {
             throw new DriveIntegrationException('Google Drive service is unavailable for folder provisioning.');
         }
 
-        $effectiveParent = $parentFolderId ?: (string) config('excellia.drive.root_folder_id', '1ExcelliaRoot2026_27AcademicSharing');
+        $effectiveParent = $parentFolderId ?: $this->rootFolderId();
 
-        if (config('excellia.drive.mode') === 'google_api') {
+        if ($this->activeMode() === 'google_api') {
             $accessToken = $this->fetchGoogleAccessToken();
-            $resp = Http::withToken($accessToken)->post('https://www.googleapis.com/drive/v3/files?fields=id,name', [
+            $resp = Http::timeout(15)->withToken($accessToken)->post('https://www.googleapis.com/drive/v3/files?fields=id,name', [
                 'name' => $folderName,
                 'mimeType' => 'application/vnd.google-apps.folder',
                 'parents' => [$effectiveParent],
@@ -333,6 +351,31 @@ class GoogleDriveService
         $cleanSlug = preg_replace('/[^a-zA-Z0-9_-]/', '', $seedSlug) ?: Str::random(12);
 
         return '1ExcFolder_' . substr($cleanSlug, 0, 64);
+    }
+
+    public function verifyDriveConnection(): array
+    {
+        if ($this->activeMode() !== 'google_api') {
+            return [
+                'mode' => 'workspace_sandbox',
+                'message' => 'Private School Vault mode is active and ready. Enable Live Google Drive API when your Workspace OAuth / Service Account credentials are set.',
+            ];
+        }
+
+        $token = $this->fetchGoogleAccessToken();
+        $rootId = $this->rootFolderId();
+        $resp = Http::timeout(12)->withToken($token)->get("https://www.googleapis.com/drive/v3/files/{$rootId}", [
+            'fields' => 'id,name,mimeType',
+        ]);
+
+        if (! $resp->successful()) {
+            throw new DriveIntegrationException('Connected to Google OAuth, but root folder (' . $rootId . ') could not be accessed (HTTP ' . $resp->status() . ').');
+        }
+
+        return [
+            'mode' => 'google_api',
+            'message' => 'Connected to Google Drive API — Root Folder: ' . ($resp->json('name') ?: $rootId),
+        ];
     }
 
     private function uploadViaGoogleApi(UploadedFile $file, string $fileName, string $mimeType, string $folderId): array
@@ -352,7 +395,7 @@ class GoogleDriveService
             . file_get_contents($file->getRealPath()) . "\r\n"
             . "--{$boundary}--";
 
-        $response = Http::withToken($accessToken)
+        $response = Http::timeout(30)->withToken($accessToken)
             ->withBody($body, "multipart/related; boundary={$boundary}")
             ->post('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id,name,webViewLink');
 
@@ -360,14 +403,13 @@ class GoogleDriveService
             throw new DriveIntegrationException('Google Drive upload failed (' . $response->status() . '). Submission was not saved.');
         }
 
-        // Security invariant: never add type=anyone permissions!
         return $response->json();
     }
 
     private function verifyGoogleApiFileAccess(string $driveFileId): void
     {
         $accessToken = $this->fetchGoogleAccessToken();
-        $permResponse = Http::withToken($accessToken)
+        $permResponse = Http::timeout(12)->withToken($accessToken)
             ->get("https://www.googleapis.com/drive/v3/files/{$driveFileId}/permissions", [
                 'fields' => 'permissions(id,type,role)',
             ]);
@@ -385,12 +427,12 @@ class GoogleDriveService
 
     private function fetchGoogleAccessToken(): string
     {
-        $clientId = config('excellia.drive.oauth_client_id');
-        $clientSecret = config('excellia.drive.oauth_client_secret');
-        $refreshToken = config('excellia.drive.oauth_refresh_token');
+        $clientId = config('excellia.drive.oauth_client_id') ?: SystemSetting::getValue('google_drive_client_id');
+        $clientSecret = config('excellia.drive.oauth_client_secret') ?: SystemSetting::getSecret('google_drive_client_secret');
+        $refreshToken = config('excellia.drive.oauth_refresh_token') ?: SystemSetting::getSecret('google_drive_refresh_token');
 
         if ($clientId && $clientSecret && $refreshToken) {
-            $resp = Http::asForm()->post('https://oauth2.googleapis.com/token', [
+            $resp = Http::timeout(12)->asForm()->post('https://oauth2.googleapis.com/token', [
                 'client_id' => $clientId,
                 'client_secret' => $clientSecret,
                 'refresh_token' => $refreshToken,
@@ -404,10 +446,10 @@ class GoogleDriveService
             return (string) $resp->json('access_token');
         }
 
-        $saEmail = config('excellia.drive.service_account_email');
-        $saKey = config('excellia.drive.service_account_private_key');
+        $saEmail = config('excellia.drive.service_account_email') ?: SystemSetting::getValue('google_service_account_email');
+        $saKey = config('excellia.drive.service_account_private_key') ?: SystemSetting::getSecret('google_service_account_private_key');
         if (! $saEmail || ! $saKey) {
-            throw new DriveIntegrationException('Google Workspace API credentials are not configured in environment.');
+            throw new DriveIntegrationException('Google Workspace API credentials are not configured in Super Admin Settings or environment.');
         }
 
         $now = time();
@@ -419,7 +461,7 @@ class GoogleDriveService
             'iat' => $now,
             'exp' => $now + 3600,
         ];
-        if ($sub = config('excellia.drive.impersonate_user_email')) {
+        if ($sub = (config('excellia.drive.impersonate_user_email') ?: SystemSetting::getValue('google_impersonate_email'))) {
             $claims['sub'] = $sub;
         }
         $payload = $this->base64UrlEncode(json_encode($claims));
@@ -431,7 +473,7 @@ class GoogleDriveService
         }
         $jwt = $signingInput . '.' . $this->base64UrlEncode($signature);
 
-        $resp = Http::asForm()->post('https://oauth2.googleapis.com/token', [
+        $resp = Http::timeout(12)->asForm()->post('https://oauth2.googleapis.com/token', [
             'grant_type' => 'urn:ietf:params:oauth:grant-type:jwt-bearer',
             'assertion' => $jwt,
         ]);

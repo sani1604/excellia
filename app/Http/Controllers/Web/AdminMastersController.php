@@ -6,6 +6,7 @@ use App\Exceptions\DomainRuleException;
 use App\Http\Controllers\Controller;
 use App\Models\AcademicYear;
 use App\Models\AuditEvent;
+use App\Models\DocumentTask;
 use App\Models\DocumentType;
 use App\Models\DriveFolderMapping;
 use App\Models\EscalationRule;
@@ -20,17 +21,24 @@ use App\Models\SystemSetting;
 use App\Models\TeachingAllocation;
 use App\Models\User;
 use App\Models\UserScopeAssignment;
+use App\Services\AiAssistantService;
 use App\Services\AuditService;
+use App\Services\GoogleDriveService;
 use App\Services\MasterDataService;
+use App\Services\NotificationService;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\View\View;
+use Throwable;
 
 class AdminMastersController extends Controller
 {
     public function __construct(
         private readonly MasterDataService $masterService,
         private readonly AuditService $audit,
+        private readonly NotificationService $notifications,
+        private readonly GoogleDriveService $driveService,
+        private readonly AiAssistantService $aiService,
     ) {}
 
     public function users(Request $request): View
@@ -83,12 +91,20 @@ class AdminMastersController extends Controller
         $validated = $request->validate([
             'employee_code' => ['nullable', 'string', 'max:50'],
             'full_name' => ['required', 'string', 'max:160'],
+            'email' => ['nullable', 'email', 'max:191'],
             'primary_role_id' => ['required', 'integer', 'exists:roles,id'],
             'phone' => ['nullable', 'string', 'max:32'],
+            'password' => ['nullable', 'string', 'min:8'],
             'can_access_restricted_files' => ['nullable', 'boolean'],
             'is_active' => ['nullable', 'boolean'],
         ]);
 
+        if (empty($validated['email'])) {
+            unset($validated['email']);
+        }
+        if (empty($validated['password'])) {
+            unset($validated['password']);
+        }
         $validated['can_access_restricted_files'] = $request->boolean('can_access_restricted_files');
         if ($request->has('is_active')) {
             $validated['is_active'] = $request->boolean('is_active');
@@ -113,15 +129,17 @@ class AdminMastersController extends Controller
         );
     }
 
-    public function rolesPermissions(): View
+    public function rolesPermissions(Request $request): View
     {
         return view('admin.roles-permissions', [
-            'roles' => Role::query()->with('permissions')->orderBy('id')->get(),
+            'tab' => $request->string('tab', 'scopes')->toString(),
+            'roles' => Role::query()->with('permissions')->withCount('users')->orderBy('id')->get(),
             'permissionsByModule' => Permission::query()->orderBy('module')->orderBy('key')->get()->groupBy('module'),
             'scopeAssignments' => UserScopeAssignment::query()
                 ->with(['user.primaryRole', 'academicYear', 'assigner'])
+                ->orderByDesc('is_active')
                 ->orderByDesc('id')
-                ->limit(50)
+                ->limit(100)
                 ->get(),
             'users' => User::query()->with('primaryRole')->where('is_active', true)->orderBy('full_name')->get(),
             'academicYears' => AcademicYear::query()->orderByDesc('start_date')->get(),
@@ -129,6 +147,65 @@ class AdminMastersController extends Controller
             'sections' => Section::query()->with('schoolClass')->where('is_active', true)->orderBy('class_id')->get(),
             'subjects' => Subject::query()->where('is_active', true)->orderBy('name')->get(),
         ]);
+    }
+
+    public function storeRole(Request $request): RedirectResponse
+    {
+        $validated = $request->validate([
+            'key' => ['required', 'string', 'max:48', 'alpha_dash', 'unique:roles,key'],
+            'name' => ['required', 'string', 'max:100'],
+            'description' => ['nullable', 'string', 'max:255'],
+        ]);
+
+        $role = Role::query()->create([
+            'key' => strtoupper(str_replace('-', '_', trim($validated['key']))),
+            'name' => trim($validated['name']),
+            'description' => $validated['description'] ?? null,
+            'is_system_role' => false,
+            'is_active' => true,
+        ]);
+
+        $this->audit->log('role.created', 'role', $role->id, null, $role->toArray(), $request->user());
+
+        return redirect()->route('admin.roles', ['tab' => 'roles'])->with('success', "Created role {$role->name}.");
+    }
+
+    public function updateRole(Request $request, Role $role): RedirectResponse
+    {
+        $validated = $request->validate([
+            'name' => ['required', 'string', 'max:100'],
+            'description' => ['nullable', 'string', 'max:255'],
+        ]);
+
+        $before = $role->toArray();
+        $role->update([
+            'name' => trim($validated['name']),
+            'description' => $validated['description'] ?? null,
+            'is_active' => $role->is_system_role ? true : $request->boolean('is_active', true),
+        ]);
+
+        $this->audit->log('role.updated', 'role', $role->id, $before, $role->fresh()->toArray(), $request->user());
+
+        return redirect()->route('admin.roles', ['tab' => 'roles'])->with('success', "Updated role {$role->name}.");
+    }
+
+    public function destroyRole(Request $request, Role $role): RedirectResponse
+    {
+        if ($role->is_system_role) {
+            throw new DomainRuleException('Built-in system roles cannot be deleted.');
+        }
+
+        if ($role->users()->exists()) {
+            throw new DomainRuleException('Cannot delete a role that still has staff members assigned to it.');
+        }
+
+        $before = $role->toArray();
+        $role->permissions()->detach();
+        $role->delete();
+
+        $this->audit->log('role.deleted', 'role', $before['id'], $before, null, $request->user());
+
+        return redirect()->route('admin.roles', ['tab' => 'roles'])->with('success', "Deleted custom role {$before['name']}.");
     }
 
     public function syncRolePermissions(Request $request, Role $role): RedirectResponse
@@ -141,6 +218,8 @@ class AdminMastersController extends Controller
         $before = $role->permissions()->pluck('permissions.key')->all();
         $role->permissions()->sync($validated['permission_ids'] ?? []);
         $after = $role->permissions()->pluck('permissions.key')->all();
+
+        User::query()->where('primary_role_id', $role->id)->get()->each->flushPermissionCache();
 
         $this->audit->log(
             'role.permissions_updated',
@@ -188,7 +267,21 @@ class AdminMastersController extends Controller
 
         $this->audit->log('scope.assigned', 'user_scope_assignment', $scope->id, null, $scope->toArray(), $request->user());
 
-        return back()->with('success', 'Access scope saved successfully.');
+        return back()->with('success', 'Access scope mapping saved successfully.');
+    }
+
+    public function updateScopeAssignment(Request $request, UserScopeAssignment $scopeAssignment): RedirectResponse
+    {
+        $before = $scopeAssignment->toArray();
+        $scopeAssignment->update([
+            'can_review' => $request->boolean('can_review'),
+            'can_access_restricted' => $request->boolean('can_access_restricted'),
+            'is_active' => $request->boolean('is_active', true),
+        ]);
+
+        $this->audit->log('scope.updated', 'user_scope_assignment', $scopeAssignment->id, $before, $scopeAssignment->fresh()->toArray(), $request->user());
+
+        return back()->with('success', 'Scope mapping updated.');
     }
 
     public function revokeScopeAssignment(Request $request, UserScopeAssignment $scopeAssignment): RedirectResponse
@@ -198,6 +291,15 @@ class AdminMastersController extends Controller
         $this->audit->log('scope.revoked', 'user_scope_assignment', $scopeAssignment->id, $before, $scopeAssignment->fresh()->toArray(), $request->user());
 
         return back()->with('success', 'Scope assignment deactivated.');
+    }
+
+    public function destroyScopeAssignment(Request $request, UserScopeAssignment $scopeAssignment): RedirectResponse
+    {
+        $before = $scopeAssignment->toArray();
+        $scopeAssignment->delete();
+        $this->audit->log('scope.deleted', 'user_scope_assignment', $before['id'], $before, null, $request->user());
+
+        return back()->with('success', 'Scope mapping deleted.');
     }
 
     public function academicMasters(Request $request): View
@@ -276,6 +378,22 @@ class AdminMastersController extends Controller
         return back()->with('success', "{$academicYear->name} set as current active academic year without altering historical tasks.");
     }
 
+    public function destroyAcademicYear(Request $request, AcademicYear $academicYear): RedirectResponse
+    {
+        if ($academicYear->is_current) {
+            throw new DomainRuleException('Cannot delete the current active academic year.');
+        }
+        if (Section::query()->where('academic_year_id', $academicYear->id)->exists() || TeachingAllocation::query()->where('academic_year_id', $academicYear->id)->exists()) {
+            throw new DomainRuleException('Cannot delete an academic year that already has sections or teacher allocations. Archive it instead.');
+        }
+
+        $before = $academicYear->toArray();
+        $academicYear->delete();
+        $this->audit->log('academic_year.deleted', 'academic_year', $before['id'], $before, null, $request->user());
+
+        return back()->with('success', "Deleted draft academic year {$before['name']}.");
+    }
+
     public function storeClass(Request $request): RedirectResponse
     {
         $validated = $request->validate([
@@ -295,11 +413,15 @@ class AdminMastersController extends Controller
     public function updateClass(Request $request, SchoolClass $schoolClass): RedirectResponse
     {
         $validated = $request->validate([
+            'code' => ['nullable', 'string', 'max:24', 'unique:classes,code,' . $schoolClass->id],
             'name' => ['required', 'string', 'max:80'],
             'display_order' => ['required', 'integer', 'min:0'],
             'stage' => ['required', 'string', 'max:40'],
             'drive_folder_label' => ['nullable', 'string', 'max:120'],
         ]);
+        if (empty($validated['code'])) {
+            unset($validated['code']);
+        }
 
         $before = $schoolClass->toArray();
         $schoolClass->update(array_merge($validated, [
@@ -308,6 +430,19 @@ class AdminMastersController extends Controller
         $this->audit->log('class.updated', 'school_class', $schoolClass->id, $before, $schoolClass->fresh()->toArray(), $request->user());
 
         return back()->with('success', "Class {$schoolClass->name} updated.");
+    }
+
+    public function destroyClass(Request $request, SchoolClass $schoolClass): RedirectResponse
+    {
+        if (Section::query()->where('class_id', $schoolClass->id)->exists() || TeachingAllocation::query()->where('class_id', $schoolClass->id)->exists()) {
+            throw new DomainRuleException('Cannot delete a class that has sections or teacher allocations. Mark it Inactive instead.');
+        }
+
+        $before = $schoolClass->toArray();
+        $schoolClass->delete();
+        $this->audit->log('class.deleted', 'school_class', $before['id'], $before, null, $request->user());
+
+        return back()->with('success', "Deleted class {$before['name']}.");
     }
 
     public function storeSection(Request $request): RedirectResponse
@@ -335,6 +470,19 @@ class AdminMastersController extends Controller
         $this->masterService->saveSection($validated, $request->user(), $section);
 
         return back()->with('success', "Section {$section->name} updated.");
+    }
+
+    public function destroySection(Request $request, Section $section): RedirectResponse
+    {
+        if (TeachingAllocation::query()->where('section_id', $section->id)->exists()) {
+            throw new DomainRuleException('Cannot delete a section that has teacher allocations. Mark it Inactive instead.');
+        }
+
+        $before = $section->toArray();
+        $section->delete();
+        $this->audit->log('section.deleted', 'section', $before['id'], $before, null, $request->user());
+
+        return back()->with('success', "Deleted section {$before['name']}.");
     }
 
     public function storeSubject(Request $request): RedirectResponse
@@ -368,6 +516,19 @@ class AdminMastersController extends Controller
         $this->audit->log('subject.updated', 'subject', $subject->id, $before, $subject->fresh()->toArray(), $request->user());
 
         return back()->with('success', "Subject {$subject->name} updated.");
+    }
+
+    public function destroySubject(Request $request, Subject $subject): RedirectResponse
+    {
+        if (TeachingAllocation::query()->where('subject_id', $subject->id)->exists()) {
+            throw new DomainRuleException('Cannot delete a subject that has teacher allocations. Mark it Inactive instead.');
+        }
+
+        $before = $subject->toArray();
+        $subject->delete();
+        $this->audit->log('subject.deleted', 'subject', $before['id'], $before, null, $request->user());
+
+        return back()->with('success', "Deleted subject {$before['name']}.");
     }
 
     public function storeAllocation(Request $request): RedirectResponse
@@ -415,6 +576,19 @@ class AdminMastersController extends Controller
         $this->masterService->verifyAllocation($allocation, $request->user());
 
         return back()->with('success', 'Teaching allocation verified against approved timetable.');
+    }
+
+    public function destroyAllocation(Request $request, TeachingAllocation $allocation): RedirectResponse
+    {
+        if (DocumentTask::query()->where('teaching_allocation_id', $allocation->id)->exists()) {
+            throw new DomainRuleException('Cannot delete an allocation that has academic tasks linked to it. Deactivate or reassign it instead.');
+        }
+
+        $before = $allocation->toArray();
+        $allocation->delete();
+        $this->audit->log('allocation.deleted', 'teaching_allocation', $before['id'], $before, null, $request->user());
+
+        return back()->with('success', 'Unused teaching allocation deleted.');
     }
 
     public function documentTypes(): View
@@ -468,6 +642,7 @@ class AdminMastersController extends Controller
     public function updateDocumentType(Request $request, DocumentType $documentType): RedirectResponse
     {
         $validated = $request->validate([
+            'folder_code' => ['nullable', 'string', 'max:16'],
             'name' => ['required', 'string', 'max:150'],
             'folder_name' => ['required', 'string', 'max:180'],
             'extensions_csv' => ['required', 'string', 'max:200'],
@@ -482,6 +657,7 @@ class AdminMastersController extends Controller
 
         $before = $documentType->toArray();
         $documentType->update([
+            'folder_code' => ! empty($validated['folder_code']) ? trim($validated['folder_code']) : $documentType->folder_code,
             'name' => trim($validated['name']),
             'folder_name' => trim($validated['folder_name']),
             'allowed_extensions' => $exts,
@@ -502,6 +678,19 @@ class AdminMastersController extends Controller
         return back()->with('success', "Document type {$documentType->name} updated.");
     }
 
+    public function destroyDocumentType(Request $request, DocumentType $documentType): RedirectResponse
+    {
+        if (DocumentTask::query()->where('document_type_id', $documentType->id)->exists() || DriveFolderMapping::query()->where('document_type_id', $documentType->id)->exists()) {
+            throw new DomainRuleException('Cannot delete a document type that has tasks or folder mappings. Mark it Inactive instead.');
+        }
+
+        $before = $documentType->toArray();
+        $documentType->delete();
+        $this->audit->log('document_type.deleted', 'document_type', $before['id'], $before, null, $request->user());
+
+        return back()->with('success', "Deleted document type {$before['name']}.");
+    }
+
     public function driveMappings(): View
     {
         $currentYear = AcademicYear::current();
@@ -518,6 +707,7 @@ class AdminMastersController extends Controller
             'subjects' => Subject::query()->where('is_active', true)->orderBy('name')->get(),
             'teachers' => User::query()->where('is_active', true)->whereHas('primaryRole', fn ($q) => $q->where('key', Role::TEACHER))->orderBy('full_name')->get(),
             'documentTypes' => DocumentType::query()->where('is_active', true)->orderBy('display_order')->get(),
+            'driveMode' => $this->driveService->activeMode(),
         ]);
     }
 
@@ -558,6 +748,15 @@ class AdminMastersController extends Controller
         return back()->with('success', 'Google Drive folder mapping updated.');
     }
 
+    public function destroyDriveMapping(Request $request, DriveFolderMapping $mapping): RedirectResponse
+    {
+        $before = $mapping->toArray();
+        $mapping->delete();
+        $this->audit->log('drive_mapping.deleted', 'drive_folder_mapping', $before['id'], $before, null, $request->user());
+
+        return back()->with('success', 'Google Drive folder mapping removed.');
+    }
+
     public function provisionDriveMappings(Request $request): RedirectResponse
     {
         $validated = $request->validate([
@@ -583,9 +782,10 @@ class AdminMastersController extends Controller
         return back()->with('success', "Verified & activated Drive folder mapping ({$mapping->drive_folder_id}).");
     }
 
-    public function settings(): View
+    public function settings(Request $request): View
     {
         return view('admin.settings', [
+            'tab' => $request->string('tab', 'general')->toString(),
             'settings' => SystemSetting::query()->orderBy('group')->orderBy('key')->get()->keyBy('key'),
             'escalationRules' => EscalationRule::query()->orderBy('threshold_value')->orderBy('id')->get(),
             'notificationRules' => NotificationRule::query()->orderBy('id')->get(),
@@ -595,6 +795,174 @@ class AdminMastersController extends Controller
 
     public function updateSettings(Request $request): RedirectResponse
     {
+        $section = $request->string('settings_section', 'legacy_all')->toString();
+        $actor = $request->user();
+
+        if ($section === 'email') {
+            $validated = $request->validate([
+                'mail_mailer_mode' => ['required', 'string', 'in:log,smtp'],
+                'mail_from_address' => ['nullable', 'email', 'max:191'],
+                'mail_from_name' => ['nullable', 'string', 'max:120'],
+                'mail_smtp_host' => ['nullable', 'string', 'max:191'],
+                'mail_smtp_port' => ['nullable', 'integer', 'min:1', 'max:65535'],
+                'mail_smtp_encryption' => ['nullable', 'string', 'in:tls,ssl,none'],
+                'mail_smtp_username' => ['nullable', 'string', 'max:191'],
+                'mail_smtp_password' => ['nullable', 'string', 'max:500'],
+            ]);
+
+            SystemSetting::setValue('email_notifications_enabled', $request->boolean('email_notifications_enabled'), 'email', 'Enable or disable email reminders & notifications', $actor->id);
+            SystemSetting::setValue('mail_mailer_mode', $validated['mail_mailer_mode'], 'email', 'Email transport mode', $actor->id);
+            SystemSetting::setValue('mail_from_address', $validated['mail_from_address'] ?? '', 'email', 'Sender email address', $actor->id);
+            SystemSetting::setValue('mail_from_name', $validated['mail_from_name'] ?? 'Excellia School Portal', 'email', 'Sender display name', $actor->id);
+            SystemSetting::setValue('mail_smtp_host', $validated['mail_smtp_host'] ?? '', 'email', 'SMTP server host', $actor->id);
+            SystemSetting::setValue('mail_smtp_port', (int) ($validated['mail_smtp_port'] ?? 587), 'email', 'SMTP server port', $actor->id);
+            SystemSetting::setValue('mail_smtp_encryption', $validated['mail_smtp_encryption'] ?? 'tls', 'email', 'SMTP encryption', $actor->id);
+            SystemSetting::setValue('mail_smtp_username', $validated['mail_smtp_username'] ?? '', 'email', 'SMTP username', $actor->id);
+
+            if ($request->boolean('clear_mail_smtp_password')) {
+                SystemSetting::clearSecret('mail_smtp_password');
+            } elseif (! empty($validated['mail_smtp_password'])) {
+                SystemSetting::setSecret('mail_smtp_password', $validated['mail_smtp_password'], 'email', 'Encrypted SMTP password', $actor->id);
+            }
+
+            $this->audit->log('settings.email_updated', 'system_setting', null, null, [
+                'email_notifications_enabled' => $request->boolean('email_notifications_enabled'),
+                'mail_mailer_mode' => $validated['mail_mailer_mode'],
+                'mail_from_address' => $validated['mail_from_address'] ?? '',
+            ], $actor);
+
+            return redirect()->route('admin.settings', ['tab' => 'email'])->with('success', 'Email reminder settings saved.');
+        }
+
+        if ($section === 'whatsapp') {
+            $validated = $request->validate([
+                'whatsapp_provider' => ['required', 'string', 'in:whatify,meta_cloud,webhook,sandbox'],
+                'whatsapp_default_country_code' => ['nullable', 'string', 'max:6'],
+                'whatify_base_url' => ['nullable', 'url', 'max:255'],
+                'whatify_api_key' => ['nullable', 'string', 'max:500'],
+                'whatify_account_id' => ['nullable', 'integer', 'min:1'],
+                'whatify_mode' => ['nullable', 'string', 'in:text,template'],
+                'whatify_template_name' => ['nullable', 'string', 'max:150'],
+                'whatsapp_meta_api_url' => ['nullable', 'url', 'max:255'],
+                'whatsapp_phone_number_id' => ['nullable', 'string', 'max:120'],
+                'whatsapp_meta_access_token' => ['nullable', 'string', 'max:1000'],
+                'whatsapp_webhook_url' => ['nullable', 'url', 'max:255'],
+                'whatsapp_webhook_secret' => ['nullable', 'string', 'max:500'],
+            ]);
+
+            SystemSetting::setValue('whatsapp_notifications_enabled', $request->boolean('whatsapp_notifications_enabled'), 'whatsapp', 'Enable or disable WhatsApp alerts', $actor->id);
+            SystemSetting::setValue('whatsapp_provider', $validated['whatsapp_provider'], 'whatsapp', 'Active WhatsApp provider', $actor->id);
+            SystemSetting::setValue('whatsapp_default_country_code', ($validated['whatsapp_default_country_code'] ?? '') ?: '91', 'whatsapp', 'Default country dialing code', $actor->id);
+            SystemSetting::setValue('whatify_base_url', ($validated['whatify_base_url'] ?? '') ?: 'https://whatify.in/api/v1/external', 'whatsapp', 'Whatify External API Base URL', $actor->id);
+            SystemSetting::setValue('whatify_account_id', $validated['whatify_account_id'] ?? null, 'whatsapp', 'Whatify whatsapp_account_id', $actor->id);
+            SystemSetting::setValue('whatify_mode', $validated['whatify_mode'] ?? 'text', 'whatsapp', 'Whatify delivery mode (text or template)', $actor->id);
+            SystemSetting::setValue('whatify_template_name', $validated['whatify_template_name'] ?? '', 'whatsapp', 'Approved Whatify template name', $actor->id);
+            SystemSetting::setValue('whatsapp_meta_api_url', ($validated['whatsapp_meta_api_url'] ?? '') ?: 'https://graph.facebook.com/v21.0', 'whatsapp', 'Meta Graph API base URL', $actor->id);
+            SystemSetting::setValue('whatsapp_phone_number_id', $validated['whatsapp_phone_number_id'] ?? '', 'whatsapp', 'Meta WhatsApp phone_number_id', $actor->id);
+            SystemSetting::setValue('whatsapp_webhook_url', $validated['whatsapp_webhook_url'] ?? '', 'whatsapp', 'Custom WhatsApp webhook URL', $actor->id);
+
+            if ($request->boolean('clear_whatify_api_key')) {
+                SystemSetting::clearSecret('whatify_api_key');
+            } elseif (! empty($validated['whatify_api_key'])) {
+                SystemSetting::setSecret('whatify_api_key', $validated['whatify_api_key'], 'whatsapp', 'Encrypted Whatify X-API-Key', $actor->id);
+            }
+
+            if (! empty($validated['whatsapp_meta_access_token'])) {
+                SystemSetting::setSecret('whatsapp_meta_access_token', $validated['whatsapp_meta_access_token'], 'whatsapp', 'Encrypted Meta Cloud token', $actor->id);
+            }
+            if (! empty($validated['whatsapp_webhook_secret'])) {
+                SystemSetting::setSecret('whatsapp_webhook_secret', $validated['whatsapp_webhook_secret'], 'whatsapp', 'Encrypted Webhook secret', $actor->id);
+            }
+
+            $this->audit->log('settings.whatsapp_updated', 'system_setting', null, null, [
+                'whatsapp_notifications_enabled' => $request->boolean('whatsapp_notifications_enabled'),
+                'whatsapp_provider' => $validated['whatsapp_provider'],
+                'whatify_mode' => $validated['whatify_mode'] ?? 'text',
+                'whatify_key_configured' => SystemSetting::hasSecret('whatify_api_key', config('excellia.whatsapp.whatify_api_key')),
+            ], $actor);
+
+            return redirect()->route('admin.settings', ['tab' => 'whatsapp'])->with('success', 'WhatsApp & Whatify API settings saved.');
+        }
+
+        if ($section === 'google') {
+            $validated = $request->validate([
+                'google_drive_root_folder_id' => ['nullable', 'string', 'max:255'],
+                'google_drive_root_folder_name' => ['nullable', 'string', 'max:255'],
+                'google_drive_client_id' => ['nullable', 'string', 'max:255'],
+                'google_drive_client_secret' => ['nullable', 'string', 'max:500'],
+                'google_drive_refresh_token' => ['nullable', 'string', 'max:1000'],
+                'google_service_account_email' => ['nullable', 'email', 'max:255'],
+                'google_service_account_private_key' => ['nullable', 'string', 'max:8000'],
+                'google_impersonate_email' => ['nullable', 'email', 'max:255'],
+                'google_sso_hosted_domain' => ['nullable', 'string', 'max:120'],
+                'google_sso_client_id' => ['nullable', 'string', 'max:255'],
+                'google_sso_client_secret' => ['nullable', 'string', 'max:500'],
+            ]);
+
+            SystemSetting::setValue('google_drive_live_enabled', $request->boolean('google_drive_live_enabled'), 'google', 'Enable live Google Drive API v3 vs local vault', $actor->id);
+            SystemSetting::setValue('google_drive_root_folder_id', ($validated['google_drive_root_folder_id'] ?? '') ?: '1ExcelliaRoot2026_27AcademicSharing', 'google', 'Root Academic Sharing Drive Folder ID', $actor->id);
+            SystemSetting::setValue('google_drive_root_folder_name', ($validated['google_drive_root_folder_name'] ?? '') ?: 'EXCELLIA SCHOOL – ACADEMIC SHARING – 2026–27', 'google', 'Root Drive Folder Name', $actor->id);
+            SystemSetting::setValue('google_drive_client_id', $validated['google_drive_client_id'] ?? '', 'google', 'Google Drive OAuth Client ID', $actor->id);
+            SystemSetting::setValue('google_service_account_email', $validated['google_service_account_email'] ?? '', 'google', 'Google Service Account Email', $actor->id);
+            SystemSetting::setValue('google_impersonate_email', $validated['google_impersonate_email'] ?? '', 'google', 'Google Workspace Admin Impersonation Email', $actor->id);
+
+            SystemSetting::setValue('google_sso_enabled', $request->boolean('google_sso_enabled'), 'google', 'Enable Google Workspace SSO button on login', $actor->id);
+            SystemSetting::setValue('google_sso_hosted_domain', $validated['google_sso_hosted_domain'] ?? 'excelliaschool.edu.in', 'google', 'Allowed Google Workspace domain', $actor->id);
+            SystemSetting::setValue('google_sso_client_id', $validated['google_sso_client_id'] ?? '', 'google', 'Google SSO Client ID', $actor->id);
+
+            if (! empty($validated['google_drive_client_secret'])) {
+                SystemSetting::setSecret('google_drive_client_secret', $validated['google_drive_client_secret'], 'google', 'Encrypted Drive Client Secret', $actor->id);
+            }
+            if (! empty($validated['google_drive_refresh_token'])) {
+                SystemSetting::setSecret('google_drive_refresh_token', $validated['google_drive_refresh_token'], 'google', 'Encrypted Drive Refresh Token', $actor->id);
+            }
+            if (! empty($validated['google_service_account_private_key'])) {
+                SystemSetting::setSecret('google_service_account_private_key', $validated['google_service_account_private_key'], 'google', 'Encrypted Service Account Private Key', $actor->id);
+            }
+            if (! empty($validated['google_sso_client_secret'])) {
+                SystemSetting::setSecret('google_sso_client_secret', $validated['google_sso_client_secret'], 'google', 'Encrypted Google SSO Client Secret', $actor->id);
+            }
+
+            $this->audit->log('settings.google_updated', 'system_setting', null, null, [
+                'google_drive_live_enabled' => $request->boolean('google_drive_live_enabled'),
+                'google_sso_enabled' => $request->boolean('google_sso_enabled'),
+                'google_sso_hosted_domain' => $validated['google_sso_hosted_domain'] ?? 'excelliaschool.edu.in',
+            ], $actor);
+
+            return redirect()->route('admin.settings', ['tab' => 'google'])->with('success', 'Google Drive & Google Workspace SSO settings saved.');
+        }
+
+        if ($section === 'ai') {
+            $validated = $request->validate([
+                'openrouter_base_url' => ['nullable', 'url', 'max:255'],
+                'openrouter_api_key' => ['nullable', 'string', 'max:500'],
+                'openrouter_model' => ['required', 'string', 'max:160'],
+            ]);
+
+            SystemSetting::setValue('ai_openrouter_enabled', $request->boolean('ai_openrouter_enabled'), 'ai', 'Enable or disable AI Assistant globally', $actor->id);
+            SystemSetting::setValue('ai_allow_teachers', $request->boolean('ai_allow_teachers'), 'ai', 'Allow Teachers to use AI outline & note helper', $actor->id);
+            SystemSetting::setValue('ai_allow_coordinators', $request->boolean('ai_allow_coordinators'), 'ai', 'Allow Coordinators & Leaders to use AI instruction & review helper', $actor->id);
+            SystemSetting::setValue('openrouter_base_url', ($validated['openrouter_base_url'] ?? '') ?: 'https://openrouter.ai/api/v1', 'ai', 'OpenRouter API Base URL', $actor->id);
+            SystemSetting::setValue('openrouter_model', trim($validated['openrouter_model']), 'ai', 'Selected OpenRouter model slug', $actor->id);
+
+            if ($request->boolean('clear_openrouter_api_key')) {
+                SystemSetting::clearSecret('openrouter_api_key');
+            } elseif (! empty($validated['openrouter_api_key'])) {
+                SystemSetting::setSecret('openrouter_api_key', $validated['openrouter_api_key'], 'ai', 'Encrypted OpenRouter API Key', $actor->id);
+            }
+
+            $this->audit->log('settings.ai_updated', 'system_setting', null, null, [
+                'ai_openrouter_enabled' => $request->boolean('ai_openrouter_enabled'),
+                'ai_allow_teachers' => $request->boolean('ai_allow_teachers'),
+                'ai_allow_coordinators' => $request->boolean('ai_allow_coordinators'),
+                'openrouter_model' => trim($validated['openrouter_model']),
+                'key_configured' => SystemSetting::hasSecret('openrouter_api_key', config('excellia.ai.api_key')),
+            ], $actor);
+
+            return redirect()->route('admin.settings', ['tab' => 'ai'])->with('success', 'OpenRouter AI Assistant settings saved.');
+        }
+
+        // General / Legacy combined settings update
         $validated = $request->validate([
             'school_timezone' => ['required', 'string', 'timezone'],
             'review_sla_hours' => ['required', 'integer', 'min:4', 'max:336'],
@@ -603,7 +971,6 @@ class AdminMastersController extends Controller
             'submission_modes.*' => ['string', 'in:PORTAL_UPLOAD,DRIVE_LINK'],
         ]);
 
-        $actor = $request->user();
         $modes = ! empty($validated['submission_modes']) ? array_values($validated['submission_modes']) : ['PORTAL_UPLOAD'];
 
         SystemSetting::setValue('school_timezone', $validated['school_timezone'], 'workflow', 'Configured school timezone for deadlines & overdue calculations', $actor->id);
@@ -611,8 +978,11 @@ class AdminMastersController extends Controller
         SystemSetting::setValue('submission_modes', $modes, 'workflow', 'Permitted teacher submission methods', $actor->id);
         SystemSetting::setValue('allow_co_class_teachers', $request->boolean('allow_co_class_teachers'), 'academics', 'Allow multiple co-class-teachers per section', $actor->id);
         SystemSetting::setValue('exclude_holidays_from_overdue', $request->boolean('exclude_holidays_from_overdue'), 'workflow', 'Exclude configured holiday dates from overdue day counts', $actor->id);
-        SystemSetting::setValue('email_notifications_enabled', $request->boolean('email_notifications_enabled'), 'notifications', 'Enable outbound email channel alongside in-app alerts', $actor->id);
-        SystemSetting::setValue('whatsapp_notifications_enabled', $request->boolean('whatsapp_notifications_enabled'), 'notifications', 'Enable outbound WhatsApp channel alongside in-app alerts', $actor->id);
+
+        if ($section === 'legacy_all') {
+            SystemSetting::setValue('email_notifications_enabled', $request->boolean('email_notifications_enabled'), 'notifications', 'Enable outbound email channel alongside in-app alerts', $actor->id);
+            SystemSetting::setValue('whatsapp_notifications_enabled', $request->boolean('whatsapp_notifications_enabled'), 'notifications', 'Enable outbound WhatsApp channel alongside in-app alerts', $actor->id);
+        }
 
         $holidays = array_values(array_filter(array_map('trim', explode(',', (string) ($validated['holidays_csv'] ?? '')))));
         SystemSetting::setValue('holidays_dates', $holidays, 'workflow', 'Configured school holiday dates (YYYY-MM-DD)', $actor->id);
@@ -623,11 +993,77 @@ class AdminMastersController extends Controller
             'submission_modes' => $modes,
             'allow_co_class_teachers' => $request->boolean('allow_co_class_teachers'),
             'exclude_holidays_from_overdue' => $request->boolean('exclude_holidays_from_overdue'),
-            'email_notifications_enabled' => $request->boolean('email_notifications_enabled'),
-            'whatsapp_notifications_enabled' => $request->boolean('whatsapp_notifications_enabled'),
         ], $actor);
 
-        return back()->with('success', 'System settings and notification channels updated.');
+        return redirect()->route('admin.settings', ['tab' => 'general'])->with('success', 'General school settings saved.');
+    }
+
+    public function testIntegration(Request $request): RedirectResponse
+    {
+        $validated = $request->validate([
+            'target' => ['required', 'string', 'in:email,whatify_ping,whatsapp_send,google_drive,openrouter_ai'],
+            'test_email' => ['nullable', 'email', 'max:191'],
+            'test_phone' => ['nullable', 'string', 'max:32'],
+        ]);
+
+        $target = $validated['target'];
+        $tabMap = [
+            'email' => 'email',
+            'whatify_ping' => 'whatsapp',
+            'whatsapp_send' => 'whatsapp',
+            'google_drive' => 'google',
+            'openrouter_ai' => 'ai',
+        ];
+        $tab = $tabMap[$target] ?? 'general';
+
+        try {
+            if ($target === 'email') {
+                $to = $validated['test_email'] ?: $request->user()->email;
+                $this->notifications->sendConfiguredEmail(
+                    $to,
+                    $request->user()->full_name,
+                    'Excellia School Portal — Test Email',
+                    'This is a test email from Excellia School Academic Portal confirming your email settings are working.'
+                );
+
+                return redirect()->route('admin.settings', ['tab' => $tab])->with('success', "Test email sent successfully to {$to}.");
+            }
+
+            if ($target === 'whatify_ping') {
+                $info = $this->notifications->verifyWhatifyConnection();
+                $walletSuffix = ! empty($info['wallet']) ? " · Wallet Balance: {$info['wallet']}" : '';
+
+                return redirect()->route('admin.settings', ['tab' => $tab])->with('success', "Whatify API connected successfully (status: {$info['status']}{$walletSuffix}).");
+            }
+
+            if ($target === 'whatsapp_send') {
+                $phone = $validated['test_phone'] ?: ($request->user()->phone ?? '');
+                $msgId = $this->notifications->sendDirectWhatsAppTest(
+                    $phone,
+                    $request->user()->full_name,
+                    'Test WhatsApp Alert',
+                    'Your Excellia School WhatsApp notification channel is connected and working.'
+                );
+
+                return redirect()->route('admin.settings', ['tab' => $tab])->with('success', "Test WhatsApp message dispatched successfully (Ref: {$msgId}).");
+            }
+
+            if ($target === 'google_drive') {
+                $res = $this->driveService->verifyDriveConnection();
+
+                return redirect()->route('admin.settings', ['tab' => $tab])->with('success', $res['message']);
+            }
+
+            if ($target === 'openrouter_ai') {
+                $res = $this->aiService->testOpenRouterConnection();
+
+                return redirect()->route('admin.settings', ['tab' => $tab])->with('success', "OpenRouter AI ({$res['model']}) replied: \"{$res['reply']}\"");
+            }
+        } catch (Throwable $e) {
+            return redirect()->route('admin.settings', ['tab' => $tab])->with('error', $e->getMessage());
+        }
+
+        return redirect()->route('admin.settings', ['tab' => $tab]);
     }
 
     public function updateNotificationRule(Request $request, NotificationRule $notificationRule): RedirectResponse
@@ -646,7 +1082,7 @@ class AdminMastersController extends Controller
 
         $this->audit->log('notification_rule.updated', 'notification_rule', $notificationRule->id, $before, $notificationRule->fresh()->toArray(), $request->user());
 
-        return back()->with('success', "Updated notification rule {$notificationRule->name}.");
+        return redirect()->route('admin.settings', ['tab' => 'rules'])->with('success', "Updated notification rule {$notificationRule->name}.");
     }
 
     public function storeEscalationRule(Request $request): RedirectResponse
@@ -674,7 +1110,7 @@ class AdminMastersController extends Controller
 
         $this->audit->log('escalation_rule.created', 'escalation_rule', $rule->id, null, $rule->toArray(), $request->user());
 
-        return back()->with('success', "Added escalation rule '{$rule->name}'.");
+        return redirect()->route('admin.settings', ['tab' => 'rules'])->with('success', "Added escalation rule '{$rule->name}'.");
     }
 
     public function updateEscalationRule(Request $request, EscalationRule $escalationRule): RedirectResponse
@@ -701,7 +1137,16 @@ class AdminMastersController extends Controller
 
         $this->audit->log('escalation_rule.updated', 'escalation_rule', $escalationRule->id, $before, $escalationRule->fresh()->toArray(), $request->user());
 
-        return back()->with('success', "Updated escalation rule '{$escalationRule->name}'.");
+        return redirect()->route('admin.settings', ['tab' => 'rules'])->with('success', "Updated escalation rule '{$escalationRule->name}'.");
+    }
+
+    public function destroyEscalationRule(Request $request, EscalationRule $escalationRule): RedirectResponse
+    {
+        $before = $escalationRule->toArray();
+        $escalationRule->delete();
+        $this->audit->log('escalation_rule.deleted', 'escalation_rule', $before['id'], $before, null, $request->user());
+
+        return redirect()->route('admin.settings', ['tab' => 'rules'])->with('success', "Deleted escalation rule '{$before['name']}'.");
     }
 
     public function auditLogs(Request $request): View

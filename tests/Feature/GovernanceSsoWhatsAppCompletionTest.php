@@ -355,12 +355,12 @@ class GovernanceSsoWhatsAppCompletionTest extends TestCase
         $this->actingAs($coord)->get('/task-management')->assertOk()->assertSee('Assign Tasks to Teachers');
         $this->actingAs($coord)->get('/reports')->assertOk()->assertSee('Download Excel (CSV)');
 
-        $this->actingAs($admin)->get('/admin/users')->assertOk()->assertSee('Staff Accounts');
+        $this->actingAs($admin)->get('/admin/users')->assertOk()->assertSee('User & Staff Master');
         $this->actingAs($admin)->get('/admin/academics')->assertOk()->assertSee('Assign Teacher to Class');
-        $this->actingAs($admin)->get('/admin/document-types')->assertOk()->assertSee('Document Types');
-        $this->actingAs($admin)->get('/admin/roles')->assertOk()->assertSee('Coordinator Wings & Staff Access');
+        $this->actingAs($admin)->get('/admin/document-types')->assertOk()->assertSee('Document Type Master');
+        $this->actingAs($admin)->get('/admin/roles')->assertOk()->assertSee('Role, Permission & Scope Mapping Master');
         $this->actingAs($admin)->get('/admin/drive-mappings')->assertOk()->assertSee('Automatic Folder Setup is Active');
-        $this->actingAs($admin)->get('/admin/settings')->assertOk()->assertSee('Reminders & School Settings');
+        $this->actingAs($admin)->get('/admin/settings')->assertOk()->assertSee('Integrations, Reminders & School Settings');
         $this->actingAs($admin)->get('/admin/audit-logs')->assertOk()->assertSee('School Activity History');
     }
 }

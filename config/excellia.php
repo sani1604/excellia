@@ -11,6 +11,7 @@ return [
     |--------------------------------------------------------------------------
     */
     'sso' => [
+        'enabled' => (bool) env('GOOGLE_SSO_ENABLED', true),
         'google_client_id' => env('GOOGLE_SSO_CLIENT_ID', env('GOOGLE_OAUTH_CLIENT_ID')),
         'google_client_secret' => env('GOOGLE_SSO_CLIENT_SECRET', env('GOOGLE_OAUTH_CLIENT_SECRET')),
         'google_redirect_uri' => env('GOOGLE_SSO_REDIRECT_URI'),
@@ -21,16 +22,9 @@ return [
     |--------------------------------------------------------------------------
     | Google Drive Workspace Integration
     |--------------------------------------------------------------------------
-    | Modes:
-    | - 'workspace_sandbox': Enforces folder structure, Drive ID conventions,
-    |   file metadata validation, zero-public-link policy, and stores encrypted/
-    |   private files on local private storage disk while recording canonical
-    |   Drive metadata in MySQL.
-    | - 'google_api': Uses Google Drive REST API v3 with Service Account JWT or
-    |   Workspace OAuth credentials from environment variables (never source control).
     */
     'drive' => [
-        'mode' => env('GOOGLE_DRIVE_MODE', 'workspace_sandbox'),
+        'mode' => env('GOOGLE_DRIVE_MODE', 'workspace_sandbox'), // workspace_sandbox | google_api
         'root_folder_id' => env('GOOGLE_DRIVE_ROOT_FOLDER_ID', '1ExcelliaRoot2026_27AcademicSharing'),
         'root_folder_name' => env('GOOGLE_DRIVE_ROOT_FOLDER_NAME', 'EXCELLIA SCHOOL – ACADEMIC SHARING – 2026–27'),
         'service_account_email' => env('GOOGLE_SERVICE_ACCOUNT_EMAIL'),
@@ -45,16 +39,38 @@ return [
 
     /*
     |--------------------------------------------------------------------------
-    | WhatsApp Notification Gateway (Meta Cloud API / Webhook / Sandbox)
+    | WhatsApp Notification Gateway (Whatify API / Meta Cloud / Webhook / Sandbox)
     |--------------------------------------------------------------------------
+    | Whatify Docs: https://whatify.in/api-docs
+    | External Base URL: https://whatify.in/api/v1/external
+    | Header: X-API-Key: wfy_your_api_key_here
     */
     'whatsapp' => [
-        'provider' => env('WHATSAPP_PROVIDER', 'sandbox'), // meta_cloud | webhook | sandbox
+        'provider' => env('WHATSAPP_PROVIDER', 'sandbox'), // whatify | meta_cloud | webhook | sandbox
+        'whatify_base_url' => env('WHATIFY_BASE_URL', 'https://whatify.in/api/v1/external'),
+        'whatify_api_key' => env('WHATIFY_API_KEY'),
+        'whatify_account_id' => env('WHATIFY_WHATSAPP_ACCOUNT_ID'),
+        'whatify_mode' => env('WHATIFY_MESSAGE_MODE', 'text'), // text | template
+        'whatify_template_name' => env('WHATIFY_TEMPLATE_NAME'),
         'api_url' => env('WHATSAPP_API_URL', 'https://graph.facebook.com/v21.0'),
         'phone_number_id' => env('WHATSAPP_PHONE_NUMBER_ID'),
         'access_token' => env('WHATSAPP_ACCESS_TOKEN'),
         'webhook_secret' => env('WHATSAPP_WEBHOOK_SECRET'),
         'default_country_code' => env('WHATSAPP_DEFAULT_COUNTRY_CODE', '91'),
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | OpenRouter AI Assistant (Super Admin Controlled)
+    |--------------------------------------------------------------------------
+    */
+    'ai' => [
+        'enabled' => (bool) env('OPENROUTER_ENABLED', false),
+        'base_url' => env('OPENROUTER_BASE_URL', 'https://openrouter.ai/api/v1'),
+        'api_key' => env('OPENROUTER_API_KEY'),
+        'model' => env('OPENROUTER_MODEL', 'openai/gpt-4o-mini'),
+        'allow_teachers' => (bool) env('OPENROUTER_ALLOW_TEACHERS', true),
+        'allow_coordinators' => (bool) env('OPENROUTER_ALLOW_COORDINATORS', true),
     ],
 
     /*

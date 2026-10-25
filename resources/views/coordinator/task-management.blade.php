@@ -2,15 +2,19 @@
 
 @section('title', 'Assign Tasks')
 @section('heading', 'Assign Tasks to Teachers')
-@section('subheading', 'Create tasks for all classes at once (e.g., Monthly Lesson Plan) or assign a task to one teacher.')
+@section('subheading', 'Create tasks for multiple classes at once or assign a task to one teacher.')
 
 @section('content')
+    @php
+        $aiAllowed = app(\App\Services\AiAssistantService::class)->isAllowedForUser(auth()->user());
+    @endphp
+
     <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
         <!-- Option 1: Bulk Create for All Classes/Subjects -->
-        <div class="bg-white rounded-2xl border border-slate-200 p-6">
+        <div class="bg-white rounded-2xl border border-slate-200 p-5 sm:p-6">
             <h2 class="text-base font-bold text-slate-900">Create Tasks for Multiple Teachers at Once</h2>
             <p class="text-sm text-slate-500 mt-0.5">
-                Creates tasks for your classes automatically. If a task already exists for the same month/exam, it will not be duplicated.
+                Creates tasks for your classes automatically without creating duplicates.
             </p>
 
             <form method="POST" action="{{ route('tasks.generate') }}" class="mt-5 space-y-4 text-sm">
@@ -20,15 +24,15 @@
                 <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
                     <div>
                         <label class="block font-medium text-slate-700 mb-1">What document is needed? *</label>
-                        <select name="document_type_id" required class="w-full rounded-xl border border-slate-300 px-3 py-2.5 bg-white">
+                        <select id="bulk_doc_type" name="document_type_id" required class="w-full rounded-xl border border-slate-300 px-3 py-2.5 bg-white">
                             @foreach($documentTypes as $dt)
-                                <option value="{{ $dt->id }}">{{ $dt->name }}</option>
+                                <option value="{{ $dt->id }}" data-name="{{ $dt->name }}">{{ $dt->name }}</option>
                             @endforeach
                         </select>
                     </div>
                     <div>
                         <label class="block font-medium text-slate-700 mb-1">Month or Exam Name *</label>
-                        <input type="text" name="period_label" required placeholder="e.g. November 2026 or Unit Test 2"
+                        <input id="bulk_period" type="text" name="period_label" required placeholder="e.g. November 2026 or Unit Test 2"
                                class="w-full rounded-xl border border-slate-300 px-3.5 py-2.5">
                     </div>
                 </div>
@@ -36,19 +40,19 @@
                 <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
                     <div>
                         <label class="block font-medium text-slate-700 mb-1">For Which Class?</label>
-                        <select name="class_id" class="w-full rounded-xl border border-slate-300 px-3 py-2.5 bg-white">
-                            <option value="">All My Classes</option>
+                        <select id="bulk_class" name="class_id" class="w-full rounded-xl border border-slate-300 px-3 py-2.5 bg-white">
+                            <option value="" data-name="All Classes">All My Classes</option>
                             @foreach($classes as $c)
-                                <option value="{{ $c->id }}">{{ $c->name }}</option>
+                                <option value="{{ $c->id }}" data-name="{{ $c->name }}">{{ $c->name }}</option>
                             @endforeach
                         </select>
                     </div>
                     <div>
                         <label class="block font-medium text-slate-700 mb-1">For Which Subject?</label>
-                        <select name="subject_id" class="w-full rounded-xl border border-slate-300 px-3 py-2.5 bg-white">
-                            <option value="">All Subjects</option>
+                        <select id="bulk_subject" name="subject_id" class="w-full rounded-xl border border-slate-300 px-3 py-2.5 bg-white">
+                            <option value="" data-name="All Subjects">All Subjects</option>
                             @foreach($subjects as $s)
-                                <option value="{{ $s->id }}">{{ $s->name }}</option>
+                                <option value="{{ $s->id }}" data-name="{{ $s->name }}">{{ $s->name }}</option>
                             @endforeach
                         </select>
                     </div>
@@ -67,6 +71,21 @@
                     </div>
                 </div>
 
+                <div>
+                    <div class="flex items-center justify-between gap-2 mb-1">
+                        <label class="font-medium text-slate-700">Instructions for Teachers (Optional)</label>
+                        @if($aiAllowed)
+                            <button type="button"
+                                    onclick="const dt=document.getElementById('bulk_doc_type');const cl=document.getElementById('bulk_class');const sb=document.getElementById('bulk_subject');window.excelliaAiAssist(this,{action:'task_instructions',document_type:dt.options[dt.selectedIndex].dataset.name,class_name:cl.options[cl.selectedIndex].dataset.name,subject:sb.options[sb.selectedIndex].dataset.name,period:document.getElementById('bulk_period').value||'Upcoming Month'},function(txt){document.getElementById('bulk_instructions').value=txt;})"
+                                    class="text-xs font-semibold text-purple-700 hover:underline cursor-pointer">
+                                ✨ AI Draft Instructions
+                            </button>
+                        @endif
+                    </div>
+                    <textarea id="bulk_instructions" name="instructions" rows="2" placeholder="Helpful checklist or instructions..."
+                              class="w-full rounded-xl border border-slate-300 px-3.5 py-2 text-sm"></textarea>
+                </div>
+
                 <button type="submit" class="w-full py-3 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-semibold shadow-2xs cursor-pointer">
                     Create Tasks for Teachers
                 </button>
@@ -74,7 +93,7 @@
         </div>
 
         <!-- Option 2: Assign to One Specific Teacher -->
-        <div class="bg-white rounded-2xl border border-slate-200 p-6">
+        <div class="bg-white rounded-2xl border border-slate-200 p-5 sm:p-6">
             <h2 class="text-base font-bold text-slate-900">Assign to One Teacher</h2>
             <p class="text-sm text-slate-500 mt-0.5">Use this when you want to assign a single task to one class & teacher.</p>
 
@@ -95,15 +114,15 @@
                 <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
                     <div>
                         <label class="block font-medium text-slate-700 mb-1">Document Category *</label>
-                        <select name="document_type_id" required class="w-full rounded-xl border border-slate-300 px-3 py-2.5 bg-white">
+                        <select id="single_doc_type" name="document_type_id" required class="w-full rounded-xl border border-slate-300 px-3 py-2.5 bg-white">
                             @foreach($documentTypes as $dt)
-                                <option value="{{ $dt->id }}">{{ $dt->name }}</option>
+                                <option value="{{ $dt->id }}" data-name="{{ $dt->name }}">{{ $dt->name }}</option>
                             @endforeach
                         </select>
                     </div>
                     <div>
                         <label class="block font-medium text-slate-700 mb-1">Month or Exam Name *</label>
-                        <input type="text" name="period_label" required placeholder="e.g. December 2026"
+                        <input id="single_period" type="text" name="period_label" required placeholder="e.g. December 2026"
                                class="w-full rounded-xl border border-slate-300 px-3.5 py-2.5">
                     </div>
                 </div>
@@ -122,9 +141,18 @@
                 </div>
 
                 <div>
-                    <label class="block font-medium text-slate-700 mb-1">Short Note for Teacher (Optional)</label>
-                    <input type="text" name="instructions" placeholder="Any helpful instruction..."
-                           class="w-full rounded-xl border border-slate-300 px-3.5 py-2.5">
+                    <div class="flex items-center justify-between gap-2 mb-1">
+                        <label class="font-medium text-slate-700">Instructions for Teacher (Optional)</label>
+                        @if($aiAllowed)
+                            <button type="button"
+                                    onclick="const dt=document.getElementById('single_doc_type');window.excelliaAiAssist(this,{action:'task_instructions',document_type:dt.options[dt.selectedIndex].dataset.name,period:document.getElementById('single_period').value||'Upcoming Month'},function(txt){document.getElementById('single_instructions').value=txt;})"
+                                    class="text-xs font-semibold text-purple-700 hover:underline cursor-pointer">
+                                ✨ AI Draft Instructions
+                            </button>
+                        @endif
+                    </div>
+                    <textarea id="single_instructions" name="instructions" rows="2" placeholder="Any helpful instruction..."
+                              class="w-full rounded-xl border border-slate-300 px-3.5 py-2 text-sm"></textarea>
                 </div>
 
                 <button type="submit" class="w-full py-3 rounded-xl bg-slate-900 hover:bg-slate-800 text-white font-semibold cursor-pointer">
@@ -134,14 +162,14 @@
         </div>
     </div>
 
-    <!-- Clean Assigned Tasks List (Options tucked neatly inside Edit button!) -->
+    <!-- Clean Assigned Tasks List -->
     <div class="bg-white rounded-2xl border border-slate-200 overflow-hidden">
-        <div class="px-6 py-4 border-b border-slate-100">
+        <div class="px-5 sm:px-6 py-4 border-b border-slate-100">
             <h2 class="text-base font-bold text-slate-900">Recently Assigned Tasks</h2>
         </div>
         <div class="divide-y divide-slate-100">
             @foreach($tasks as $task)
-                <div class="p-5 flex flex-col sm:flex-row sm:items-start justify-between gap-4">
+                <div class="p-4 sm:p-5 flex flex-col sm:flex-row sm:items-start justify-between gap-4">
                     <div class="space-y-1">
                         <div class="flex flex-wrap items-center gap-2">
                             <a href="{{ route('tasks.show', $task) }}" class="text-base font-semibold text-indigo-700 hover:underline">{{ $task->title }}</a>
@@ -165,7 +193,7 @@
                             <summary class="px-3.5 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-semibold cursor-pointer inline-block">
                                 Change Date / Options
                             </summary>
-                            <div class="mt-2 p-4 rounded-xl bg-slate-50 border border-slate-200 space-y-3 w-72 text-xs">
+                            <div class="mt-2 p-4 rounded-xl bg-slate-50 border border-slate-200 space-y-3 w-full sm:w-72 text-xs">
                                 <form method="POST" action="{{ route('tasks.update', $task) }}" class="space-y-2">
                                     @csrf
                                     @method('PATCH')

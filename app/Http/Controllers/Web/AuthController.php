@@ -3,6 +3,8 @@
 namespace App\Http\Controllers\Web;
 
 use App\Http\Controllers\Controller;
+use App\Models\Role;
+use App\Models\SystemSetting;
 use App\Models\User;
 use App\Services\AuditService;
 use Illuminate\Http\RedirectResponse;
@@ -25,20 +27,30 @@ class AuthController extends Controller
             return redirect()->route('dashboard');
         }
 
+        // Order clearly: Super Admin FIRST, then Principal, Director, Headmistress, Coordinator, Teachers, Viewer
+        $rolePriority = [
+            Role::SUPER_ADMIN => 1,
+            Role::PRINCIPAL => 2,
+            Role::DIRECTOR => 3,
+            Role::HEADMISTRESS => 4,
+            Role::COORDINATOR => 5,
+            Role::TEACHER => 6,
+            Role::VIEWER => 7,
+        ];
+
         $demoAccounts = User::query()
             ->with('primaryRole')
             ->where('is_active', true)
-            ->orderBy('primary_role_id')
             ->orderBy('id')
             ->get()
             ->unique('primary_role_id')
+            ->sortBy(fn (User $u) => $rolePriority[$u->primaryRole?->key ?? ''] ?? 99)
             ->values();
 
-        // Include second teacher too so cross-teacher isolation can be tested easily from UI
         $secondTeacher = User::query()
             ->with('primaryRole')
             ->where('is_active', true)
-            ->whereHas('primaryRole', fn ($q) => $q->where('key', 'TEACHER'))
+            ->whereHas('primaryRole', fn ($q) => $q->where('key', Role::TEACHER))
             ->skip(1)
             ->first();
 
@@ -46,10 +58,15 @@ class AuthController extends Controller
             $demoAccounts->push($secondTeacher);
         }
 
+        $ssoEnabled = (bool) SystemSetting::getValue('google_sso_enabled', config('excellia.sso.enabled', true));
+        $clientId = $this->resolveGoogleClientId();
+        $clientSecret = $this->resolveGoogleClientSecret();
+
         return view('auth.login', [
             'demoAccounts' => $demoAccounts,
-            'googleSsoConfigured' => ! empty(config('excellia.sso.google_client_id')) && ! empty(config('excellia.sso.google_client_secret')),
-            'googleHostedDomain' => config('excellia.sso.allowed_hosted_domain', 'excelliaschool.edu.in'),
+            'googleSsoEnabled' => $ssoEnabled,
+            'googleSsoConfigured' => $ssoEnabled && $clientId !== '' && $clientSecret !== '',
+            'googleHostedDomain' => $this->resolveHostedDomain(),
         ]);
     }
 
@@ -84,17 +101,21 @@ class AuthController extends Controller
         return redirect()->intended(route('dashboard'));
     }
 
-    /**
-     * Initiates Google Workspace OAuth 2.0 / OIDC login for school accounts.
-     */
     public function redirectToGoogle(Request $request): RedirectResponse
     {
-        $clientId = (string) config('excellia.sso.google_client_id');
-        $clientSecret = (string) config('excellia.sso.google_client_secret');
+        $ssoEnabled = (bool) SystemSetting::getValue('google_sso_enabled', config('excellia.sso.enabled', true));
+        if (! $ssoEnabled) {
+            return redirect()->route('login')->withErrors([
+                'email' => 'Google Workspace sign-in is currently disabled by Super Admin.',
+            ]);
+        }
+
+        $clientId = $this->resolveGoogleClientId();
+        $clientSecret = $this->resolveGoogleClientSecret();
 
         if ($clientId === '' || $clientSecret === '') {
             return redirect()->route('login')->withErrors([
-                'email' => 'Google Workspace SSO credentials (GOOGLE_SSO_CLIENT_ID / GOOGLE_SSO_CLIENT_SECRET) are not configured in environment yet. Please sign in with school email & password.',
+                'email' => 'Google Workspace SSO credentials are not configured yet. Super Admin can add Client ID & Secret under Integrations & Settings -> Google Drive & SSO.',
             ]);
         }
 
@@ -102,7 +123,7 @@ class AuthController extends Controller
         $request->session()->put('google_oauth_state', $state);
 
         $redirectUri = (string) (config('excellia.sso.google_redirect_uri') ?: route('login.google.callback'));
-        $hostedDomain = (string) config('excellia.sso.allowed_hosted_domain', '');
+        $hostedDomain = $this->resolveHostedDomain();
 
         $query = [
             'client_id' => $clientId,
@@ -120,9 +141,6 @@ class AuthController extends Controller
         return redirect()->away('https://accounts.google.com/o/oauth2/v2/auth?' . http_build_query($query));
     }
 
-    /**
-     * Handles Google Workspace OAuth 2.0 callback, verifying CSRF state, email verification, hosted domain, and active user status.
-     */
     public function handleGoogleCallback(Request $request): RedirectResponse
     {
         $expectedState = (string) $request->session()->pull('google_oauth_state', '');
@@ -140,8 +158,8 @@ class AuthController extends Controller
             ]);
         }
 
-        $clientId = (string) config('excellia.sso.google_client_id');
-        $clientSecret = (string) config('excellia.sso.google_client_secret');
+        $clientId = $this->resolveGoogleClientId();
+        $clientSecret = $this->resolveGoogleClientSecret();
         $redirectUri = (string) (config('excellia.sso.google_redirect_uri') ?: route('login.google.callback'));
 
         $tokenResp = Http::asForm()->post('https://oauth2.googleapis.com/token', [
@@ -175,7 +193,7 @@ class AuthController extends Controller
         }
 
         $email = mb_strtolower(trim((string) $profileResp->json('email')));
-        $allowedDomain = mb_strtolower(trim((string) config('excellia.sso.allowed_hosted_domain', '')));
+        $allowedDomain = mb_strtolower(trim($this->resolveHostedDomain()));
         if ($allowedDomain !== '' && ! str_ends_with($email, '@' . $allowedDomain)) {
             $this->audit->log('auth.google_sso_denied', 'user', null, null, ['email' => $email, 'reason' => 'domain_mismatch'], null, $request);
 
@@ -263,5 +281,23 @@ class AuthController extends Controller
         $request->session()->regenerateToken();
 
         return redirect()->route('login');
+    }
+
+    private function resolveGoogleClientId(): string
+    {
+        return trim((string) (config('excellia.sso.google_client_id') ?: SystemSetting::getValue('google_sso_client_id', '')));
+    }
+
+    private function resolveGoogleClientSecret(): string
+    {
+        return trim((string) (config('excellia.sso.google_client_secret') ?: SystemSetting::getSecret('google_sso_client_secret', '')));
+    }
+
+    private function resolveHostedDomain(): string
+    {
+        return trim((string) SystemSetting::getValue(
+            'google_sso_hosted_domain',
+            config('excellia.sso.allowed_hosted_domain', 'excelliaschool.edu.in')
+        ));
     }
 }

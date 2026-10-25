@@ -1,8 +1,8 @@
 @extends('layouts.app')
 
-@section('title', 'Document Types')
-@section('heading', 'Document Types')
-@section('subheading', 'Manage the types of files teachers submit (Lesson Plans, Worksheets, Question Papers, etc.).')
+@section('title', 'Document Type Master')
+@section('heading', 'Document Type Master')
+@section('subheading', 'Create, edit, or deactivate academic document categories (00–05+), allowed file formats, and privacy rules.')
 
 @section('content')
     @php
@@ -20,7 +20,7 @@
     @endphp
 
     <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        <div class="bg-white rounded-2xl border border-slate-200 p-6">
+        <div class="bg-white rounded-2xl border border-slate-200 p-5 sm:p-6 h-fit">
             <h2 class="text-base font-bold text-slate-900">Add Document Type</h2>
             <form method="POST" action="{{ route('admin.document-types.store') }}" class="mt-4 space-y-3.5 text-sm">
                 @csrf
@@ -38,7 +38,7 @@
                     <div>
                         <label class="block font-medium text-slate-700 mb-1">Short Code *</label>
                         <input type="text" name="code" required placeholder="LAB_PLAN"
-                               class="w-full rounded-xl border border-slate-300 px-3 py-2.5">
+                               class="w-full rounded-xl border border-slate-300 px-3 py-2.5 uppercase">
                     </div>
                 </div>
                 <div>
@@ -81,12 +81,12 @@
         </div>
 
         <div class="lg:col-span-2 bg-white rounded-2xl border border-slate-200 overflow-hidden">
-            <div class="px-6 py-4 border-b border-slate-100">
-                <h2 class="text-base font-bold text-slate-900">Current Document Types</h2>
+            <div class="px-5 sm:px-6 py-4 border-b border-slate-100">
+                <h2 class="text-base font-bold text-slate-900">Configured Document Types ({{ $documentTypes->count() }})</h2>
             </div>
             <div class="divide-y divide-slate-100">
                 @foreach($documentTypes as $dt)
-                    <div class="p-5 flex flex-col sm:flex-row sm:items-start justify-between gap-4">
+                    <div class="p-4 sm:p-5 flex flex-col sm:flex-row sm:items-start justify-between gap-4">
                         <div class="space-y-1">
                             <div class="flex flex-wrap items-center gap-2">
                                 <span class="text-base font-bold text-slate-900">{{ $dt->folder_name }}</span>
@@ -102,32 +102,49 @@
                             </div>
                         </div>
 
-                        <details class="shrink-0 text-left">
-                            <summary class="px-3.5 py-1.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-800 text-xs font-semibold cursor-pointer inline-block">
-                                Edit
-                            </summary>
-                            <form method="POST" action="{{ route('admin.document-types.update', $dt) }}" class="mt-2 p-4 rounded-xl bg-slate-50 border border-slate-200 space-y-2.5 w-64 text-xs">
-                                @csrf
-                                @method('PATCH')
-                                <input type="text" name="name" value="{{ $dt->name }}" required class="w-full rounded-lg border border-slate-300 bg-white px-2.5 py-1.5" placeholder="Name">
-                                <input type="text" name="folder_name" value="{{ $dt->folder_name }}" required class="w-full rounded-lg border border-slate-300 bg-white px-2.5 py-1.5" placeholder="Folder Name">
-                                <input type="text" name="extensions_csv" value="{{ implode(',', $dt->normalizedExtensions()) }}" required class="w-full rounded-lg border border-slate-300 bg-white px-2.5 py-1.5">
-                                <div class="grid grid-cols-2 gap-1.5">
-                                    <input type="number" name="max_file_size_mb" value="{{ $dt->max_file_size_mb }}" required class="rounded-lg border border-slate-300 bg-white px-2 py-1.5">
-                                    <select name="sensitivity_level" class="rounded-lg border border-slate-300 bg-white px-1.5 py-1.5">
-                                        @foreach($privacyLabels as $lvl => $lbl)
-                                            <option value="{{ $lvl }}" @selected($dt->sensitivity_level === $lvl)>{{ explode(' ', $lbl)[0] }}</option>
+                        <div class="flex items-center gap-2 shrink-0">
+                            <details class="text-left">
+                                <summary class="px-3.5 py-1.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-800 text-xs font-semibold cursor-pointer inline-block">
+                                    Edit
+                                </summary>
+                                <form method="POST" action="{{ route('admin.document-types.update', $dt) }}" class="mt-2 p-4 rounded-xl bg-slate-50 border border-slate-200 space-y-2.5 w-64 text-xs">
+                                    @csrf
+                                    @method('PATCH')
+                                    <div class="grid grid-cols-3 gap-1.5">
+                                        <input type="text" name="folder_code" value="{{ $dt->folder_code }}" class="rounded-lg border border-slate-300 bg-white px-2 py-1.5" placeholder="06">
+                                        <input type="text" name="name" value="{{ $dt->name }}" required class="col-span-2 rounded-lg border border-slate-300 bg-white px-2 py-1.5" placeholder="Name">
+                                    </div>
+                                    <input type="text" name="folder_name" value="{{ $dt->folder_name }}" required class="w-full rounded-lg border border-slate-300 bg-white px-2.5 py-1.5" placeholder="Folder Name">
+                                    <input type="text" name="extensions_csv" value="{{ implode(',', $dt->normalizedExtensions()) }}" required class="w-full rounded-lg border border-slate-300 bg-white px-2.5 py-1.5">
+                                    <div class="grid grid-cols-2 gap-1.5">
+                                        <input type="number" name="max_file_size_mb" value="{{ $dt->max_file_size_mb }}" required class="rounded-lg border border-slate-300 bg-white px-2 py-1.5">
+                                        <select name="sensitivity_level" class="rounded-lg border border-slate-300 bg-white px-1.5 py-1.5">
+                                            @foreach($privacyLabels as $lvl => $lbl)
+                                                <option value="{{ $lvl }}" @selected($dt->sensitivity_level === $lvl)>{{ explode(' ', $lbl)[0] }}</option>
+                                            @endforeach
+                                        </select>
+                                    </div>
+                                    <select name="default_due_rule" class="w-full rounded-lg border border-slate-300 bg-white px-2 py-1.5">
+                                        @foreach($cadenceLabels as $val => $lbl)
+                                            <option value="{{ $val }}" @selected($dt->default_due_rule === $val)>{{ $lbl }}</option>
                                         @endforeach
                                     </select>
-                                </div>
-                                <input type="hidden" name="default_due_rule" value="{{ $dt->default_due_rule }}">
-                                <div class="flex items-center justify-between pt-1">
-                                    <label class="flex items-center gap-1"><input type="checkbox" name="requires_review" value="1" @checked($dt->requires_review)>Coordinator Check</label>
-                                    <label class="flex items-center gap-1"><input type="checkbox" name="is_active" value="1" @checked($dt->is_active)>Active</label>
-                                </div>
-                                <button type="submit" class="w-full py-1.5 rounded-lg bg-indigo-600 text-white font-semibold cursor-pointer">Save Changes</button>
+                                    <div class="flex items-center justify-between pt-1">
+                                        <label class="flex items-center gap-1"><input type="checkbox" name="requires_review" value="1" @checked($dt->requires_review)>Check Required</label>
+                                        <label class="flex items-center gap-1"><input type="checkbox" name="is_active" value="1" @checked($dt->is_active)>Active</label>
+                                    </div>
+                                    <button type="submit" class="w-full py-1.5 rounded-lg bg-indigo-600 text-white font-semibold cursor-pointer">Save Changes</button>
+                                </form>
+                            </details>
+
+                            <form method="POST" action="{{ route('admin.document-types.destroy', $dt) }}">
+                                @csrf
+                                @method('DELETE')
+                                <button type="submit" class="px-3 py-1.5 rounded-xl bg-rose-50 hover:bg-rose-100 text-rose-700 text-xs font-semibold cursor-pointer">
+                                    Delete
+                                </button>
                             </form>
-                        </details>
+                        </div>
                     </div>
                 @endforeach
             </div>
