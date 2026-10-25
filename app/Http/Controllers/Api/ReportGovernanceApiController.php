@@ -169,7 +169,7 @@ class ReportGovernanceApiController extends Controller
     public function settings(): JsonResponse
     {
         return response()->json([
-            'data' => SystemSetting::query()->orderBy('group')->orderBy('key')->get(),
+            'data' => $this->sanitizedSettingsPayload(),
         ]);
     }
 
@@ -182,6 +182,7 @@ class ReportGovernanceApiController extends Controller
             'exclude_holidays_from_overdue' => ['sometimes', 'boolean'],
             'email_notifications_enabled' => ['sometimes', 'boolean'],
             'whatsapp_notifications_enabled' => ['sometimes', 'boolean'],
+            'ai_openrouter_enabled' => ['sometimes', 'boolean'],
             'holidays_dates' => ['sometimes', 'array'],
             'holidays_dates.*' => ['date_format:Y-m-d'],
             'submission_modes' => ['sometimes', 'array', 'min:1'],
@@ -190,15 +191,36 @@ class ReportGovernanceApiController extends Controller
 
         $actor = $request->user();
         foreach ($validated as $key => $val) {
-            $group = str_contains($key, 'notifications') ? 'notifications' : ($key === 'allow_co_class_teachers' ? 'academics' : 'workflow');
+            $group = str_contains($key, 'notifications') ? 'notifications' : (str_contains($key, 'ai_') ? 'ai' : ($key === 'allow_co_class_teachers' ? 'academics' : 'workflow'));
             SystemSetting::setValue($key, $val, $group, null, $actor->id);
         }
 
         $this->audit->log('settings.updated', 'system_setting', null, null, $validated, $actor);
 
         return response()->json([
-            'data' => SystemSetting::query()->orderBy('group')->orderBy('key')->get(),
+            'data' => $this->sanitizedSettingsPayload(),
         ]);
+    }
+
+    private function sanitizedSettingsPayload(): array
+    {
+        return SystemSetting::query()
+            ->orderBy('group')
+            ->orderBy('key')
+            ->get()
+            ->map(function (SystemSetting $row): array {
+                $item = $row->toArray();
+                if (is_array($row->value_json) && ! empty($row->value_json['is_secret'])) {
+                    $item['value_json'] = [
+                        'is_secret' => true,
+                        'configured' => SystemSetting::hasSecret($row->key),
+                        'masked' => SystemSetting::maskedSecret($row->key),
+                    ];
+                }
+
+                return $item;
+            })
+            ->all();
     }
 
     public function auditEvents(Request $request): JsonResponse

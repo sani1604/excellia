@@ -98,6 +98,21 @@
                 </button>
             </form>
         </div>
+    @elseif($task->workflow_status === 'APPROVED' && auth()->user()->hasPermission('tasks.update'))
+        <details class="bg-white rounded-2xl border border-slate-200 p-4 sm:p-5">
+            <summary class="text-sm font-semibold text-amber-800 cursor-pointer flex items-center justify-between">
+                <span>Submission is Approved — Need the teacher to upload an updated file? Click to Reopen</span>
+                <span class="text-xs px-2.5 py-1 rounded-lg bg-amber-50 border border-amber-200">Reopen Option</span>
+            </summary>
+            <form method="POST" action="{{ route('tasks.reopen', $task) }}" class="mt-3 pt-3 border-t border-slate-100 flex flex-col sm:flex-row gap-2.5">
+                @csrf
+                <input type="text" name="reason" required placeholder="Reason for reopening approved submission (recorded in Audit Log)..."
+                       class="flex-1 rounded-xl border border-slate-300 px-3.5 py-2 text-sm">
+                <button type="submit" class="px-4 py-2 rounded-xl bg-amber-600 hover:bg-amber-700 text-white text-sm font-semibold cursor-pointer">
+                    Reopen for Resubmission
+                </button>
+            </form>
+        </details>
     @endif
 
     <!-- Previous Uploads & Feedback History -->
